@@ -16,7 +16,7 @@ const uint8_t shade_red[4] = {15, 48, 139, 155};
 const uint8_t shade_green[4] = {56, 98, 172, 188};
 const uint8_t shade_blue[4] = {15, 48, 15, 15};
 
-void report_stop(const GbCpu *cpu, const GbMemory *memory, GbStepResult result)
+void report_fault(const GbCpu *cpu, const GbMemory *memory, GbStepResult result)
 {
     const unsigned pc = cpu->pc;
     const unsigned opcode = gb_memory_read(memory, static_cast<uint16_t>(pc));
@@ -26,9 +26,25 @@ void report_stop(const GbCpu *cpu, const GbMemory *memory, GbStepResult result)
     else if (result == GB_STEP_UNSUPPORTED)
         std::cerr << "Unsupported opcode " << std::hex << opcode
                   << " at " << pc << std::dec << "; execution stopped.\n";
-    else if (result == GB_STEP_STOPPED)
-        std::cerr << "STOP at " << std::hex << pc << std::dec
-                  << ". Joypad wake is not implemented, so the CPU stays stopped.\n";
+}
+
+uint8_t button_mask(SDL_Keycode key, bool down, uint8_t mask)
+{
+    uint8_t bit = 0;
+    switch (key) {
+    case SDLK_RIGHT: bit = GB_BTN_RIGHT; break;
+    case SDLK_LEFT: bit = GB_BTN_LEFT; break;
+    case SDLK_UP: bit = GB_BTN_UP; break;
+    case SDLK_DOWN: bit = GB_BTN_DOWN; break;
+    case SDLK_Z: bit = GB_BTN_A; break;
+    case SDLK_X: bit = GB_BTN_B; break;
+    case SDLK_RSHIFT:
+    case SDLK_BACKSPACE: bit = GB_BTN_SELECT; break;
+    case SDLK_RETURN: bit = GB_BTN_START; break;
+    default: break;
+    }
+    if (!bit) return mask;
+    return down ? (uint8_t)(mask | bit) : (uint8_t)(mask & (uint8_t)~bit);
 }
 
 bool present_rom(const char *path)
@@ -52,23 +68,31 @@ bool present_rom(const char *path)
               << ", ROM size code: " << static_cast<unsigned>(header.rom_size_code)
               << ", RAM size code: " << static_cast<unsigned>(header.ram_size_code) << '\n';
     std::cout << "Header checksum: " << (header.checksum_valid ? "valid" : "INVALID") << '\n';
-    if (!(header.checksum_valid && header.cartridge_type == 0 &&
-          header.rom_size_code == 0 && length == 0x8000)) {
-        std::cout << "Memory mapping currently supports valid 32 KiB ROM-only cartridges.\n";
+
+    GbMemory memory;
+    if (!gb_memory_load_cartridge(&memory, rom, length, error, sizeof error)) {
+        std::cerr << error << '\n';
         std::free(rom);
         return false;
     }
-
-    GbMemory memory;
-    if (!gb_memory_init(&memory, rom, length)) {
-        std::cerr << "Could not map the cartridge.\n";
-        std::free(rom);
-        return false;
+    char save_path[1024];
+    const bool battery = memory.cart.battery;
+    if (battery) {
+        if (!gb_cartridge_save_path(path, save_path, sizeof save_path)) {
+            std::cerr << "Save path is too long.\n";
+            std::free(rom);
+            return false;
+        }
+        if (!gb_memory_load_save(&memory, save_path, error, sizeof error))
+            std::cerr << error << '\n';
+        else
+            std::cout << "Battery save: " << save_path << '\n';
     }
     GbCpu cpu;
     gb_cpu_init_dmg_post_boot(&cpu);
     gb_ppu_apply_dmg_post_boot(&memory);
-    std::cout << "Running. Close the window to stop.\n";
+    std::cout << "Running. Arrows move, Z is A, X is B, Enter is Start, Backspace or Right Shift is Select.\n";
+    std::cout << "Close the window to stop.\n";
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::cerr << "SDL_Init: " << SDL_GetError() << '\n';
@@ -92,21 +116,41 @@ bool present_rom(const char *path)
     SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
 
     uint8_t rgb[GB_LCD_WIDTH * GB_LCD_HEIGHT * 3];
+    uint8_t held = 0;
     bool running = true;
     bool cpu_alive = true;
+    bool stop_noted = false;
     while (running) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_EVENT_QUIT) running = false;
+            else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
+                held = 0;
+            else if ((event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) &&
+                     !event.key.repeat)
+                held = button_mask(event.key.key, event.key.down, held);
         }
+        if (gb_joypad_set_pressed(&memory, held) && cpu.stopped)
+            gb_cpu_leave_stop(&cpu);
+        if (cpu.stopped) {
+            if (!stop_noted) {
+                std::cout << "STOP is waiting for a button.\n";
+                stop_noted = true;
+            }
+            SDL_Delay(16);
+            continue;
+        }
+        stop_noted = false;
         for (int steps = 0; running && cpu_alive && steps < 20000; ++steps) {
             unsigned spent = 0;
             GbStepResult result = gb_cpu_step(&cpu, &memory, &spent);
-            if (result == GB_STEP_ILLEGAL || result == GB_STEP_UNSUPPORTED || result == GB_STEP_STOPPED) {
-                report_stop(&cpu, &memory, result);
+            if (result == GB_STEP_ILLEGAL || result == GB_STEP_UNSUPPORTED) {
+                report_fault(&cpu, &memory, result);
                 cpu_alive = false;
                 break;
             }
+            if (result == GB_STEP_STOPPED)
+                break;
             if (gb_ppu_frame_ready(&memory)) {
                 const uint8_t *shades = gb_ppu_pixels(&memory);
                 for (int i = 0; i < GB_LCD_WIDTH * GB_LCD_HEIGHT; ++i) {
@@ -126,6 +170,8 @@ bool present_rom(const char *path)
         if (cpu_alive && !gb_ppu_frame_ready(&memory))
             SDL_Delay(16);
     }
+    if (battery && !gb_memory_store_save(&memory, save_path, error, sizeof error))
+        std::cerr << error << '\n';
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
@@ -153,7 +199,7 @@ void setup_window()
     const uint8_t flags = gb_set_bit(0, 7);
     std::cout << "C core called from C++: bit 7 = " << static_cast<unsigned>(gb_bit_is_set(flags, 7))
               << '\n';
-    std::cout << "Close the window to exit. Pass a 32 KiB ROM-only cartridge to run it.\n";
+    std::cout << "Close the window to exit. Pass a ROM-only, MBC1, or MBC3 cartridge to run it.\n";
     bool running = true;
     while (running) {
         SDL_Event event;

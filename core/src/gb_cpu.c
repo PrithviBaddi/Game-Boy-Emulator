@@ -426,6 +426,12 @@ void gb_cpu_init_dmg_post_boot(GbCpu *cpu)
     cpu->l = 0x4d;
 }
 
+void gb_cpu_leave_stop(GbCpu *cpu)
+{
+    if (cpu)
+        cpu->stopped = false;
+}
+
 void gb_cpu_request_interrupt(GbMemory *memory, GbInterrupt source)
 {
     if (!memory || source > GB_INT_JOYPAD)

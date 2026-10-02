@@ -13,7 +13,7 @@ typedef struct {
     uint8_t a, f, b, c, d, e, h, l;
     uint16_t sp, pc;
     bool halted;
-    bool stopped;   /* STOP; a button is not wired up until the joypad stage */
+    bool stopped;   /* STOP; gb_cpu_leave_stop clears this after a button press */
     bool ime;       /* master interrupt enable; RETI sets this immediately */
     bool halt_bug;  /* next opcode fetch does not advance PC */
     bool locked;    /* a documented illegal opcode has hard-locked the CPU */
@@ -44,6 +44,8 @@ void gb_cpu_init(GbCpu *cpu);
 /* Documented DMG register values after the boot ROM, without running that ROM
  * or initializing video/IO memory. */
 void gb_cpu_init_dmg_post_boot(GbCpu *cpu);
+/* Leave the stopped state so the next step executes again. */
+void gb_cpu_leave_stop(GbCpu *cpu);
 /* Sets one IF bit. Devices in later stages call this; the CPU clears the bit
  * when it dispatches that interrupt. */
 void gb_cpu_request_interrupt(GbMemory *memory, GbInterrupt source);

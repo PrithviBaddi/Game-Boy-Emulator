@@ -286,26 +286,40 @@ static int test_oam_dma(void)
     gb_memory_write(&memory, 0xff46, 0xc0);
     GB_REQUIRE(memory.oam[0] == 0x00);
     gb_timer_advance(&memory, 4);
+    GB_REQUIRE(memory.oam[0] == 0x00);
+    GB_REQUIRE(memory.ppu.dma_active);
+    gb_timer_advance(&memory, 4);
     GB_REQUIRE(memory.oam[0] == 0x12);
     GB_REQUIRE(memory.ppu.dma_active);
     GB_REQUIRE(gb_memory_read(&memory, 0xfe00) == 0xff);
-    GB_REQUIRE(gb_memory_read(&memory, 0x0000) == 0xff);
+    GB_REQUIRE(gb_memory_read(&memory, 0x0000) == 0xab);
     gb_memory_write(&memory, 0xff80, 0x99);
     GB_REQUIRE(gb_memory_read(&memory, 0xff80) == 0x99);
     gb_memory_write(&memory, 0xc002, 0x77);
-    GB_REQUIRE(memory.wram[2] == 0x00);
+    GB_REQUIRE(memory.wram[2] == 0x77);
+    memory.wram[0x1e00] = 0x5a;
 
-    gb_timer_advance(&memory, 4 * 159);
+    gb_timer_advance(&memory, 4 * 158);
+    GB_REQUIRE(memory.ppu.dma_active);
+    GB_REQUIRE(gb_memory_read(&memory, 0xfe00) == 0xff);
+    gb_timer_advance(&memory, 4);
+    GB_REQUIRE(memory.ppu.dma_active);
+    GB_REQUIRE(gb_memory_read(&memory, 0xfe00) == 0xff);
+    gb_timer_advance(&memory, 4);
     GB_REQUIRE(!memory.ppu.dma_active);
     GB_REQUIRE(gb_memory_read(&memory, 0xfe00) == 0x12);
     GB_REQUIRE(gb_memory_read(&memory, 0xfe01) == 0x34);
 
     gb_memory_write(&memory, 0xff46, 0x80);
-    gb_timer_advance(&memory, 4);
+    gb_timer_advance(&memory, 8);
     GB_REQUIRE(memory.oam[0] == 0x56);
+    gb_memory_write(&memory, 0xff46, 0xfe);
+    GB_REQUIRE(memory.ppu.dma_offset == 0);
+    gb_timer_advance(&memory, 8);
+    GB_REQUIRE(memory.oam[0] == 0x5a);
     gb_memory_write(&memory, 0xff46, 0xc0);
     GB_REQUIRE(memory.ppu.dma_offset == 0);
-    gb_timer_advance(&memory, 4);
+    gb_timer_advance(&memory, 8);
     GB_REQUIRE(memory.oam[0] == 0x12);
 
     GB_REQUIRE(fresh(rom, &memory) == 0);

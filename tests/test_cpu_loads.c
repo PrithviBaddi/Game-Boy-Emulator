@@ -83,13 +83,14 @@ int main(void)
     GB_REQUIRE(gb_test_pair(machine.cpu.h, machine.cpu.l) == 0xdfff);
     GB_REQUIRE(machine.cpu.f == 0xf0 && cycles == 8);
 
-    /* High-memory edges: offset 0 is 0xFF00, offset 0xFF is IE. */
+    /* LDH (00h),A writes joypad select bits 4 and 5. 0x42 leaves both groups
+     * selected, and an unpressed line reads as 1. */
     const uint8_t ldh_store[] = {0xe0, 0x00};
     GB_REQUIRE(gb_test_load(&machine, ldh_store, sizeof ldh_store));
     machine.cpu.a = 0x42;
     machine.cpu.f = 0xf0;
     GB_REQUIRE(gb_cpu_step(&machine.cpu, &machine.memory, &cycles) == GB_STEP_OK);
-    GB_REQUIRE(gb_memory_read(&machine.memory, 0xff00) == 0x42);
+    GB_REQUIRE(gb_memory_read(&machine.memory, 0xff00) == 0xcf);
     GB_REQUIRE(cycles == 12 && machine.cpu.f == 0xf0);
 
     machine.rom[0x100] = 0xe0;

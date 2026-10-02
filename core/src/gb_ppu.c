@@ -241,22 +241,25 @@ static void step_dma(GbMemory *memory)
     GbPpu *ppu = &memory->ppu;
     if (!ppu->dma_active)
         return;
+    /* call_timing reads the CALL target on the cycle that copies the last
+     * byte, and that read must still see OAM as locked. The transfer then
+     * stays active for one more machine cycle before the CPU is allowed in. */
+    if (ppu->dma_wait)
+    {
+        ppu->dma_wait = false;
+        return;
+    }
+    if (ppu->dma_finish)
+    {
+        ppu->dma_active = false;
+        ppu->dma_finish = false;
+        return;
+    }
     uint16_t source = (uint16_t)(((uint16_t)ppu->dma_page << 8) | ppu->dma_offset);
-    uint8_t value = 0xff;
-    if (source < 0x8000)
-        value = memory->rom[source];
-    else if (source < 0xa000)
-        value = memory->vram[source - 0x8000];
-    else if (source < 0xc000)
-        value = 0xff;
-    else if (source < 0xe000)
-        value = memory->wram[source - 0xc000];
-    else if (source < 0xfe00)
-        value = memory->wram[source - 0xe000];
-    memory->oam[ppu->dma_offset] = value;
+    memory->oam[ppu->dma_offset] = gb_memory_dma_peek(memory, source);
     ppu->dma_offset++;
     if (ppu->dma_offset == 0xa0)
-        ppu->dma_active = false;
+        ppu->dma_finish = true;
 }
 
 void gb_ppu_on_machine_cycle(GbMemory *memory)
@@ -363,10 +366,12 @@ void gb_ppu_write(GbMemory *memory, uint16_t address, uint8_t value)
         ppu->lyc = value;
         break;
     case 0xff46:
-        ppu->dma = value;
-        ppu->dma_page = value;
-        ppu->dma_offset = 0;
-        ppu->dma_active = true;
+    ppu->dma = value;
+    ppu->dma_page = value;
+    ppu->dma_offset = 0;
+    ppu->dma_active = true;
+    ppu->dma_wait = true;
+    ppu->dma_finish = false;
         break;
     case 0xff47:
         ppu->bgp = value;
@@ -398,12 +403,11 @@ bool gb_ppu_cpu_can_access(const GbMemory *memory, uint16_t address)
 
 bool gb_ppu_dma_blocks_cpu(const GbMemory *memory, uint16_t address)
 {
-    if (!memory->ppu.dma_active)
-        return false;
-    /* FF46 stays writable so a second write can restart the transfer. */
-    if (address == 0xff46)
-        return false;
-    return address < 0xff80 || address == 0xffff;
+    (void)memory;
+    (void)address;
+    /* OAM itself is locked by gb_ppu_cpu_can_access. Echo RAM, ROM, and work
+     * RAM stay readable: call_timing fetches a CALL from $FDFE during DMA. */
+    return false;
 }
 
 const uint8_t *gb_ppu_pixels(const GbMemory *memory)

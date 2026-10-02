@@ -83,6 +83,25 @@ target_compile_definitions(ppu_tests PRIVATE DEMO_ROM="${CMAKE_SOURCE_DIR}/examp
 target_compile_options(ppu_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
 add_test(NAME ppu_video_dma COMMAND ppu_tests)
 
+add_executable(joypad_tests tests/test_joypad.c)
+target_link_libraries(joypad_tests PRIVATE gbcore)
+target_include_directories(joypad_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+target_compile_options(joypad_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+add_test(NAME joypad COMMAND joypad_tests)
+
+add_executable(mbc_tests tests/test_mbc.c)
+target_link_libraries(mbc_tests PRIVATE gbcore)
+target_include_directories(mbc_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+target_compile_options(mbc_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+add_test(NAME mbc_saves COMMAND mbc_tests)
+
+add_executable(play_tests tests/test_play.c)
+target_link_libraries(play_tests PRIVATE gbcore)
+target_include_directories(play_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+target_compile_definitions(play_tests PRIVATE GAME_ROM="${CMAKE_SOURCE_DIR}/examples/catch.gb")
+target_compile_options(play_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+add_test(NAME catch_game COMMAND play_tests)
+
 add_executable(cpu_demo examples/cpu_demo.c)
 target_link_libraries(cpu_demo PRIVATE gbcore)
 

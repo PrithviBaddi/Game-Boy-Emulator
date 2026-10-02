@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 enum { GB_HEADER_END = 0x150, GB_MAX_ROM_SIZE = 8 * 1024 * 1024 };
 
@@ -65,5 +66,54 @@ bool gb_cartridge_read_file(const char *path, uint8_t **out_rom,
     }
     *out_rom = bytes;
     *out_length = (size_t)file_size;
+    return true;
+}
+
+size_t gb_cartridge_rom_bytes(uint8_t rom_size_code)
+{
+    if (rom_size_code > 8)
+        return 0;
+    return (size_t)0x8000 << rom_size_code;
+}
+
+bool gb_cartridge_ram_bytes(uint8_t ram_size_code, size_t *out_bytes)
+{
+    if (!out_bytes)
+        return false;
+    switch (ram_size_code)
+    {
+    case 0:
+        *out_bytes = 0;
+        return true;
+    case 1:
+        *out_bytes = 0x800;
+        return true;
+    case 2:
+        *out_bytes = 0x2000;
+        return true;
+    case 3:
+        *out_bytes = 0x8000;
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool gb_cartridge_save_path(const char *rom_path, char *out, size_t out_size)
+{
+    if (!rom_path || !out || out_size < 5)
+        return false;
+    size_t length = strlen(rom_path);
+    if (length + 4 >= out_size)
+        return false;
+    memcpy(out, rom_path, length + 1);
+    if (length >= 3 && strcmp(out + length - 3, ".gb") == 0)
+        memcpy(out + length - 3, ".sav", 5);
+    else if (length >= 4 && strcmp(out + length - 4, ".gbc") == 0)
+        memcpy(out + length - 4, ".sav", 5);
+    else if (length + 4 < out_size)
+        memcpy(out + length, ".sav", 5);
+    else
+        return false;
     return true;
 }
