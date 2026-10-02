@@ -162,5 +162,32 @@ int main(void)
         assert(cycles == ((source == 6 || destination == 6) ? 8u : 4u));
     }
 
+    /* ADD A,r for B, C, D, E, H, L, [HL], and A. */
+    const uint8_t expected_a[] = {
+        0x00, 0xf2, 0x01, 0xf0, 0xb2, 0x14, 0x00, 0xe2};
+    const uint8_t expected_f[] = {
+        0xb0, 0x00, 0x10, 0x30, 0x10, 0x10, 0xb0, 0x10};
+
+    for (unsigned source = 0; source < 8; ++source)
+    {
+        rom[0x100] = (uint8_t)(0x80 + source);
+        gb_cpu_init(&cpu);
+        cpu.a = 0xf1;
+        cpu.b = 0x0f;
+        cpu.c = 0x01;
+        cpu.d = 0x10;
+        cpu.e = 0xff;
+        cpu.h = 0xc1;
+        cpu.l = 0x23;
+        cpu.f = 0xf0; /* confirm ADD replaces old flags */
+        gb_memory_write(&memory, 0xc123, 0x0f);
+
+        assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+        assert(cpu.a == expected_a[source]);
+        assert(cpu.f == expected_f[source]);
+        assert(cpu.pc == 0x101);
+        assert(cycles == (source == 6 ? 8u : 4u));
+    }
+
     return 0;
 }

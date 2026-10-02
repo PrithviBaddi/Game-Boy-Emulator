@@ -75,6 +75,30 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         *cycles = (source == 6 || destination == 6) ? 8 : 4;
         return GB_STEP_OK;
     }
+    if (opcode >= 0x80 && opcode <= 0x87)
+    {
+        unsigned source = opcode & 7u;
+        uint16_t hl = (uint16_t)(((uint16_t)cpu->h << 8) | cpu->l);
+        uint8_t value = source == 6
+                            ? gb_memory_read(memory, hl)
+                            : *register_by_index(cpu, source);
+
+        uint8_t old_a = cpu->a;
+        unsigned result = (unsigned)old_a + value;
+
+        cpu->a = (uint8_t)result;
+        cpu->f = 0; /* ADD clears the subtraction flag */
+        if (cpu->a == 0)
+            cpu->f |= FLAG_Z;
+        if (((old_a & 0x0f) + (value & 0x0f)) > 0x0f)
+            cpu->f |= FLAG_H;
+        if (result > 0xff)
+            cpu->f |= FLAG_C;
+
+        cpu->pc += 1;
+        *cycles = source == 6 ? 8 : 4;
+        return GB_STEP_OK;
+    }
     switch (opcode)
     {
     case 0x00: /* NOP: do nothing */
@@ -96,22 +120,22 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         cpu->pc += 2;
         *cycles = 8;
         return GB_STEP_OK;
-    case 0x80:
-    { /* ADD A,B: update result and Z/N/H/C flags */
-        unsigned result = (unsigned)cpu->a + cpu->b;
-        uint8_t flags = 0;
-        if ((uint8_t)result == 0)
-            flags |= FLAG_Z;
-        if (((cpu->a & 0x0f) + (cpu->b & 0x0f)) > 0x0f)
-            flags |= FLAG_H;
-        if (result > 0xff)
-            flags |= FLAG_C;
-        cpu->a = (uint8_t)result;
-        cpu->f = flags; /* addition clears N */
-        cpu->pc += 1;
-        *cycles = 4;
-        return GB_STEP_OK;
-    }
+    // case 0x80:
+    // { /* ADD A,B: update result and Z/N/H/C flags */
+    //     unsigned result = (unsigned)cpu->a + cpu->b;
+    //     uint8_t flags = 0;
+    //     if ((uint8_t)result == 0)
+    //         flags |= FLAG_Z;
+    //     if (((cpu->a & 0x0f) + (cpu->b & 0x0f)) > 0x0f)
+    //         flags |= FLAG_H;
+    //     if (result > 0xff)
+    //         flags |= FLAG_C;
+    //     cpu->a = (uint8_t)result;
+    //     cpu->f = flags; /* addition clears N */
+    //     cpu->pc += 1;
+    //     *cycles = 4;
+    //     return GB_STEP_OK;
+    // }
     case 0xea:
     { /* LD (a16),A: write A to the next 16-bit address */
         uint8_t low = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
