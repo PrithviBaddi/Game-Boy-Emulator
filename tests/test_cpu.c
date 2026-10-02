@@ -35,10 +35,13 @@ int main(void)
         GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
     GB_REQUIRE(cpu.a == 0 && cpu.f == 0xb0);
 
-    rom[0x100] = 0xd3; /* unsupported opcode */
+    rom[0x100] = 0xd3; /* documented illegal opcode; the CPU hard-locks */
     gb_cpu_init(&cpu);
-    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_UNSUPPORTED);
-    GB_REQUIRE(cpu.pc == 0x100 && cycles == 0);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_ILLEGAL);
+    GB_REQUIRE(cpu.pc == 0x100 && cycles == 0 && cpu.locked);
+    rom[0x100] = 0x00;
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_ILLEGAL);
+    GB_REQUIRE(cpu.pc == 0x100);
     /* LD C,d8 loads C without changing the flags. */
     rom[0x100] = 0x0e;
     rom[0x101] = 0x07;

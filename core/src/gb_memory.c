@@ -18,7 +18,12 @@ uint8_t gb_memory_read(const GbMemory *memory, uint16_t address) {
     if (address < 0xfe00) return memory->wram[address - 0xe000]; /* echo */
     if (address < 0xfea0) return memory->oam[address - 0xfe00];
     if (address < 0xff00) return 0xff; /* unusable region */
-    if (address < 0xff80) return memory->io[address - 0xff00];
+    if (address < 0xff80) {
+        uint8_t value = memory->io[address - 0xff00];
+        /* IF bits 5–7 are unused and read as 1 on a DMG. */
+        if (address == 0xff0f) return (uint8_t)(value | 0xe0);
+        return value;
+    }
     if (address < 0xffff) return memory->hram[address - 0xff80];
     return memory->interrupt_enable;
 }
@@ -31,7 +36,10 @@ void gb_memory_write(GbMemory *memory, uint16_t address, uint8_t value) {
     else if (address < 0xfe00) memory->wram[address - 0xe000] = value;
     else if (address < 0xfea0) memory->oam[address - 0xfe00] = value;
     else if (address < 0xff00) return;
-    else if (address < 0xff80) memory->io[address - 0xff00] = value;
+    else if (address < 0xff80) {
+        if (address == 0xff0f) value &= 0x1f;
+        memory->io[address - 0xff00] = value;
+    }
     else if (address < 0xffff) memory->hram[address - 0xff80] = value;
     else memory->interrupt_enable = value;
 }

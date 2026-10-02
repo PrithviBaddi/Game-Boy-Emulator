@@ -70,5 +70,11 @@ Every other base opcode, including the 11 illegal opcodes, returned
   returns, `RETI` (sets `ime` immediately), `RST`, and `PUSH`/`POP` including
   AF masking and SP wrap. `cpu_control` includes a countdown loop and nested
   calls, and every test run has a step limit.
-- [ ] **5. CB prefix, CPU control, illegal opcodes, coverage report.**
+- [x] **5. CB prefix, CPU control, illegal opcodes, coverage report.** All 256
+  CB operations, `DI`, delayed `EI`, `HALT` including the HALT bug, `STOP`,
+  instruction-boundary interrupt dispatch, and the 11 illegal opcodes.
+  `docs/CPU_OPCODE_COVERAGE.md` records the Pan Docs split: 245 implemented,
+  11 illegal, 256 CB. `gb_cpu_request_interrupt` is the hook stage 3 devices
+  will call. Joypad wake from `STOP`, and anything that needs a running timer
+  or PPU, is still stage 3.
 - [ ] **6. Independent ROMs and stage-2 exit notes.**

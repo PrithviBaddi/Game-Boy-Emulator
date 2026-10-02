@@ -52,5 +52,23 @@ target_include_directories(cpu_control_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
 target_compile_options(cpu_control_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
 add_test(NAME cpu_control COMMAND cpu_control_tests)
 
+add_executable(cpu_cb_tests tests/test_cpu_cb.c tests/gb_test_util.c)
+target_link_libraries(cpu_cb_tests PRIVATE gbcore)
+target_include_directories(cpu_cb_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+target_compile_options(cpu_cb_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+add_test(NAME cpu_cb COMMAND cpu_cb_tests)
+
+add_executable(cpu_interrupt_tests tests/test_cpu_interrupts.c tests/gb_test_util.c)
+target_link_libraries(cpu_interrupt_tests PRIVATE gbcore)
+target_include_directories(cpu_interrupt_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+target_compile_options(cpu_interrupt_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+add_test(NAME cpu_interrupts COMMAND cpu_interrupt_tests)
+
+add_executable(cpu_coverage_tests tests/test_cpu_coverage.c tests/gb_test_util.c)
+target_link_libraries(cpu_coverage_tests PRIVATE gbcore)
+target_include_directories(cpu_coverage_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+target_compile_options(cpu_coverage_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+add_test(NAME cpu_coverage COMMAND cpu_coverage_tests)
+
 add_executable(cpu_demo examples/cpu_demo.c)
 target_link_libraries(cpu_demo PRIVATE gbcore)
