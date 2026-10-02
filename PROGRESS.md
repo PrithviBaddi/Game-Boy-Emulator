@@ -22,6 +22,17 @@
   Mooneye `div_timing`, `pop_timing`, and the 13 acceptance timer ROMs passed.
   `halt_ime0_ei` and `call_timing` still hit the runner's cycle limit because
   they wait on `LY` and OAM DMA, which are stage 4.
-- Next is the PPU. `STOP` stays stopped until a later joypad stage clears
-  `stopped`. Joypad, serial, and the APU are not modeled.
-- No claim that a commercial game or the full picture hardware runs.
+- Stage 4 picture processor and OAM DMA are implemented. `ctest` has 13
+  passing targets, including exact-pixel, scanline, VBlank, access-boundary,
+  and DMA tests. `cpu_demo` still ends at `RAM[0xC000] = 69` and 48 T-cycles.
+  UBSan reports the same 13/13 and a clean `cpu_demo`.
+- `./build/pocketglass examples/video-demo.gb` runs an original ROM through
+  the CPU and bus and shows a scrolling checker plus a moving sprite.
+  Mode 3 is a fixed 172 dots (`mode3_stall_dots` is the later stall hook).
+- Mooneye `halt_ime0_ei`, `oam_dma/basic`, and `oam_dma/reg_read` pass.
+  `call_timing` still times out (echo RAM reads `$FF` during DMA, so the
+  `CALL` at `$FDFE` becomes `RST 38`). `oam_dma/sources-GS` and the extracted
+  PPU timing ROMs fail with signature `0x42`.
+- Still needed before an ordinary game is playable: joypad (including `STOP`
+  wake), cartridge banking beyond 32 KiB ROM-only, serial, audio, and tighter
+  PPU timing. No claim that a commercial game runs.

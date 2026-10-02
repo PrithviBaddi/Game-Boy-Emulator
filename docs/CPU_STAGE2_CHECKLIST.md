@@ -88,5 +88,6 @@ Every other base opcode, including the 11 illegal opcodes, returned
   and macOS combination, before the test body runs.
 
 Stage 3 took the timer handoff. `DIV`/`TIMA`/`TMA`/`TAC` and the timer
-interrupt are in `docs/TIMER.md`. Joypad release of `STOP`, the PPU, and MBC
-are still later stages.
+interrupt are in `docs/TIMER.md`. Stage 4 took the picture processor and OAM
+DMA; see `docs/PPU.md`. Joypad release of `STOP`, audio, and cartridge
+banking are still later stages.

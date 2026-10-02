@@ -11,10 +11,11 @@ header and maps a 32 KiB ROM-only cartridge into a Game Boy memory bus.
 Stage 2 of the CPU is complete: every documented legal SM83 opcode, including
 the CB prefix, has an implementation, and the 11 illegal opcodes lock the CPU
 instead of running as `NOP`. Stage 3 adds the DMG divider and programmable
-timer. A timer overflow can request interrupt `0x50`. The desktop window still
-does not play a game. The picture processor, audio, and cartridge banking are
-later stages. `tinydbg` is an unrelated, abandoned debugger experiment and
-is not a dependency.
+timer. A timer overflow can request interrupt `0x50`. Stage 4 adds the
+monochrome picture processor, a 160-byte OAM DMA transfer, and a window that
+shows frames produced by that processor. Audio, the joypad, and cartridge
+banking are later stages. `tinydbg` is an unrelated, abandoned debugger
+experiment and is not a dependency.
 
 ## Build and run
 
@@ -29,10 +30,10 @@ ctest --test-dir build --output-on-failure
 ./build/pocketglass
 ```
 
-Expected output includes `C core called from C++: bit 7 = 1`, and a green
-480×432 window opens. Close it to exit. The 160×144 Game Boy display will be
-scaled 3× in this window once we implement graphics. The window does not yet
-show a game.
+With no cartridge, the expected output includes
+`C core called from C++: bit 7 = 1`, and a green 480×432 window opens. Close
+it to exit. With a cartridge, the same window size is a 3× view of the
+emulated 160×144 frame.
 
 ## First cartridge experiment
 
@@ -43,11 +44,26 @@ python3 examples/make_demo_rom.py
 ./build/pocketglass examples/header-demo.gb
 ```
 
-The program should print `Cartridge: POCKETGLASS!` and `Header checksum: valid`
-plus `ROM-only memory map ready` before the green window opens. Close the window
-to exit. To try a permitted
-homebrew `.gb` file, pass its path instead. We only read its metadata so far.
-If a file is missing, truncated, or too large, the program reports an error.
+The program prints `Cartridge: POCKETGLASS!` and `Header checksum: valid`, then
+runs the image. That file has no program at `0x0100`, so the CPU executes
+`NOP` and the LCD shows an empty frame. Close the window to exit. If a file
+is missing, truncated, not a valid 32 KiB ROM-only cartridge, or too large,
+the program reports that and does not open a game window.
+
+## First picture
+
+Generate an original demo and open it. The checker and the sprite are drawn
+by the emulated CPU writing video memory, then scrolling and moving during
+VBlank:
+
+```sh
+python3 examples/make_video_demo.py
+./build/pocketglass examples/video-demo.gb
+```
+
+The window should show a scrolling checkerboard and a sprite moving right.
+Close it to exit. An illegal or unsupported opcode is printed with its
+address, and the last frame stays up until the window closes.
 
 The cartridge header starts at byte address `0x100`; the title starts at
 `0x134`. `gb_cartridge.c` reads fields by their byte offsets, computes a header
@@ -58,10 +74,12 @@ The CPU will ask the bus for a byte at an address. For instance, address
 `0x0100` comes from the cartridge, while `0xC123` is working RAM. Writes to
 the ROM are ignored. Addresses `0xE000` through `0xFDFF` mirror part of RAM.
 `gb_memory.c` is the single routing point for these accesses. `DIV`, `TIMA`,
-`TMA`, and `TAC` (`FF04`–`FF07`) are the timer in `gb_timer.c`. The other I/O
-ports still store plain bytes. Only 32 KiB ROM-only cartridges are mapped now.
-The clock contract is in `docs/TIMER.md`: `gb_cpu_step` still reports
-T-cycles, and the timer advances one machine cycle (4 T-cycles) at a time.
+`TMA`, and `TAC` (`FF04`–`FF07`) are the timer in `gb_timer.c`. LCDC, STAT,
+scroll, `LY`, DMA, and the palettes are the picture processor in `gb_ppu.c`.
+The other I/O ports still store plain bytes. Only 32 KiB ROM-only cartridges
+are mapped now. The clock contract is in `docs/TIMER.md` and `docs/PPU.md`:
+`gb_cpu_step` still reports T-cycles, and the timer, LCD, and DMA advance one
+machine cycle (4 T-cycles) at a time.
 
 ## First CPU experiment
 
@@ -111,11 +129,20 @@ The timer acceptance ROMs do too: `div_write`, `rapid_toggle`, `tim00`,
 `tim10_div_trigger`, `tim11`, `tim11_div_trigger`, `tima_reload`,
 `tima_write_reloading`, and `tma_write_reloading`.
 
-`halt_ime0_ei` reaches the cycle limit with no signature. It waits until
-`LY` is `0` and then for a VBlank interrupt. There is no picture processor,
-so that wait does not end. `call_timing` also reaches the cycle limit. It
-waits for VBlank and runs an OAM DMA transfer; both are stage 4. The combined
-64 KiB `cpu_instrs.gb` is not run: the memory bus maps 32 KiB only.
+`halt_ime0_ei` now reports the pass signature (718384 T-cycles, 108444
+steps). `oam_dma/basic` and `oam_dma/reg_read` pass as well. `call_timing`
+still reaches the 300000000 T-cycle limit. It fetches a `CALL` from echo RAM
+at `$FDFE` while DMA is active; this core returns `$FF` for that read, the
+CPU executes `RST 38`, and the ROM stays there. `oam_dma/sources-GS` ends
+with the failure signature `0x42`: a DMA source page of `$FE` is copied from
+OAM itself, which is the case that test rejects. The extracted PPU timing
+ROMs also end at `0x42`: `hblank_ly_scx_timing-GS`, `intr_1_2_timing-GS`,
+`intr_2_0_timing`, `intr_2_mode0_timing`, `intr_2_mode0_timing_sprites`,
+`intr_2_mode3_timing`, `intr_2_oam_ok_timing`, `lcdon_timing-GS`,
+`lcdon_write_timing-GS`, `stat_irq_blocking`, `stat_lyc_onoff`, and
+`vblank_stat_intr-GS`. Mode 3 is a fixed 172 dots, so those cycle counts are
+not claimed as passes. The combined 64 KiB `cpu_instrs.gb` is not run: the
+memory bus maps 32 KiB only.
 
 ## First C lesson
 

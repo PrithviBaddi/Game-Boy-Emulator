@@ -41,6 +41,9 @@ for name in ei_sequence ei_timing halt_ime0_ei rapid_di_ei if_ie_registers \
     unzip -q -o -j "$tmp/mts.zip" "*/acceptance/${name}.gb" -d "$dest/mooneye/acceptance"
 done
 unzip -q -o -j "$tmp/mts.zip" '*/acceptance/timer/*.gb' -d "$dest/mooneye/acceptance/timer"
+mkdir -p "$dest/mooneye/acceptance/oam_dma" "$dest/mooneye/acceptance/ppu"
+unzip -q -o -j "$tmp/mts.zip" '*/acceptance/oam_dma/*.gb' -d "$dest/mooneye/acceptance/oam_dma"
+unzip -q -o -j "$tmp/mts.zip" '*/acceptance/ppu/*.gb' -d "$dest/mooneye/acceptance/ppu"
 unzip -q -o -j "$tmp/mts.zip" '*/LICENSE' -d "$dest/mooneye"
 rm -rf "$tmp"
 echo "ROMs are in $dest"

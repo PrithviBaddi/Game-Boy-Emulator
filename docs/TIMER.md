@@ -55,4 +55,5 @@ service routine.
 `HALT` idle also advances the divider. A request that appears during the idle
 clears the halted flag; the following step dispatches or runs the next
 instruction. Sampling is still once per `gb_cpu_step`, not once per T-cycle.
-OAM DMA and `LY` belong to the PPU stage.
+Each of those machine cycles also advances the picture processor and any
+active OAM DMA transfer. See `docs/PPU.md`.
