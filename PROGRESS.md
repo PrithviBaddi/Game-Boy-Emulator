@@ -50,5 +50,25 @@
   steps). The 12 PPU timing ROMs still fail at `0x42`. All 11 Blargg
   individual ROMs and the previously passing timer, interrupt, and
   `oam_dma/basic` plus `reg_read` ROMs still pass. No timeouts on this run.
-- Still later: serial, audio, MBC2/MBC5, and cycle-accurate PPU timing.
-  No claim that a commercial game runs.
+- Stage 6 compatibility and release. `ctest` has 17 passing targets,
+  including `apu_channels`. `cpu_demo` still ends at `RAM[0xC000] = 69` and
+  48 T-cycles. UBSan reports the same 17/17 and a clean `cpu_demo`.
+- `oam_dma/sources-GS` passes (2544444 T-cycles, 363647 steps). The first
+  failure was DMA from `$A000` on an MBC5+RAM cartridge; `$FE` DMA reads
+  work RAM `$DE00`. All 11 Blargg ROMs and the previous CPU, timer, and DMA
+  passes still pass. The 12 PPU timing ROMs still fail at `0x42` with the
+  cycle counts in the README. No timeouts.
+- Mode 3 lengthens for scroll, the window, and objects. Line 153 shows `LY`
+  153 for 4 dots, then 0. STAT interrupts are one rising edge. LCD on starts
+  mode 2 immediately.
+- Basic DMG audio is in `gb_apu.c` and SDL. It is recognizable and not a
+  hardware DAC: the sequencer is not tied to `DIV`, and square/noise are
+  centered around zero.
+- Homebrew exercised, not committed: Sanqui's 2048 (MBC1, picture responds
+  to Start, Right, and Down; no sound in that run) and purefunktion's
+  Droneboy 1.09 (ROM-only, sound from the first frames, Right changes the
+  picture). Rhythm Land draws a frame and then halts; it is not counted as
+  playable. `scripts/package_macos.sh` writes
+  `dist/pocketglass-macos-arm64/`.
+- Still later: serial, MBC2, cycle-accurate PPU timing, and a real audio
+  DAC. No claim of complete Game Boy compatibility.

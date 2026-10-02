@@ -17,22 +17,27 @@ implemented.
 
 One line is 456 dots, which is 114 machine cycles. A frame is 154 lines:
 `LY` 0–143 are visible and `LY` 144–153 are VBlank. Entering `LY` 144 sets
-IF bit 0 once and marks a frame ready for the window. `LY` then runs through
-153 and returns to 0. Line 153 is a full 456 dots; the short line-153 quirk
-is not modeled.
+IF bit 0 once and marks a frame ready for the window. On line 153, `LY`
+reads as 153 for the first 4 dots and as 0 for the rest of that line, while
+the mode stays 1. The next line is the real return to line 0.
 
-On a visible line the mode reads as 2 for the first 80 dots, 3 for the next
-172, and 0 for the rest. `GbPpu.mode3_stall_dots` is reserved so a later
-fetcher can lengthen mode 3. It is 0, so the 172-dot mode 3 is a fixed
-simplification, not a cycle-accurate pixel pipeline. The scanline is drawn
-on the machine cycle that enters mode 0.
+On a visible line the mode reads as 2 for the first 80 dots, then 3, then 0.
+Mode 3 starts at 172 dots and grows when the line is latched at the start of
+mode 3: `SCX % 8` dots, 6 dots if the window triggers, and the object
+penalties from Pan Docs (an X of 0 costs 11, and other objects pay 6 plus
+the leftover background-fetch dots of a new tile). The mode is still sampled
+once per machine cycle, so a penalty under 4 dots is visible only when it
+crosses that boundary. The scanline is drawn on the machine cycle that
+enters mode 0.
 
 `STAT` stores bits 3–6. Reads report the mode in bits 1–0, the `LY`/`LYC`
-comparison in bit 2, and 1 in bit 7. A STAT interrupt is requested on the
-rising edge of an enabled mode-0, mode-1, mode-2, or `LYC` source. Clearing
-LCDC bit 7 sets `LY` and the dot counter to 0 and leaves VRAM and OAM open.
-Setting the bit again starts line 0 in mode 2. The first-frame delay of the
-real LCD turn-on is not modeled.
+comparison in bit 2, and 1 in bit 7. The four STAT sources are one signal.
+A STAT interrupt is the rising edge of that OR, including a write to `STAT`
+or `LYC` that makes it newly true. Leaving one source active while another
+drops does not request again. Clearing LCDC bit 7 sets `LY` and the dot
+counter to 0 and leaves VRAM and OAM open. Setting the bit again starts
+line 0 in mode 2 immediately and recomputes the STAT line. There is no
+extra blanking delay before that first mode 2.
 
 `gb_memory_init` leaves the LCD off so existing CPU and timer tests do not
 move `LY`. `gb_ppu_apply_dmg_post_boot` is what the ROM runner and the
@@ -71,13 +76,16 @@ transfer is active, and also in modes 2 and 3. ROM, VRAM (outside mode 3),
 external RAM, work RAM, echo RAM, and HRAM stay reachable. `call_timing`
 fetches its `CALL` from echo RAM at `$FDFE` and now passes. A DMA source at
 `$E000` or above is read as the address minus `$2000`, so `$FE00`–`$FFFF`
-come from work RAM `$DE00`–`$DFFF` rather than from OAM or I/O. That model
-is covered by a unit test. `oam_dma/sources-GS` still fails with signature
-`0x42`, so this source map is not treated as a match for that ROM. There is
-no same-cycle bus-conflict model beyond the OAM lock.
+come from work RAM `$DE00`–`$DFFF` rather than from OAM or I/O.
+`oam_dma/sources-GS` passes with that map once the cartridge's
+MBC5 RAM is present: the ROM failed first on a DMA from `$A000`, which is
+external RAM enabled by a write of `$0A` to `$0000`. The pass was 2544444
+T-cycles and 363647 steps. There is no same-cycle bus-conflict model beyond
+the OAM lock.
 
 ## What is still simplified
 
-Mode 3 does not stretch for sprites or scroll. `LY` 153 is not short. LCD
-enable does not delay the first frame. STAT timing is evaluated once per
-machine cycle after the line counter updates. There is no boot ROM.
+Mode 3 penalties are applied, but the PPU is not dot-accurate. The twelve
+Mooneye PPU timing ROMs still end at signature `0x42`. LCD enable does not
+imitate the first-frame blanking delay some of those ROMs measure. There is
+no boot ROM.

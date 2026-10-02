@@ -15,7 +15,9 @@ timer. A timer overflow can request interrupt `0x50`. Stage 4 adds the
 monochrome picture processor, a 160-byte OAM DMA transfer, and a window that
 shows frames produced by that processor. Stage 5 adds the DMG joypad,
 keyboard input, ROM-only and MBC1/MBC3 cartridges, battery-backed saves, and
-an original game you can finish. Audio and serial are later stages.
+an original game you can finish. Stage 6 adds MBC5, a basic four-channel
+sound chip, pause and a controls overlay, and a macOS folder you can copy
+out of the tree. Serial is still later. This is not a complete Game Boy.
 `tinydbg` is an unrelated, abandoned debugger experiment and is not a
 dependency.
 
@@ -83,22 +85,25 @@ odd waves a coin falls in the center; catch three coins and you win. Enter
 on the win or lose screen returns to the title, and Enter again starts a
 new game. The gameplay runs on the emulated CPU, joypad, timer, and picture
 processor. Z is A, X is B, and Backspace or Right Shift is Select. Those
-keys are not used by Catch. Losing window focus releases every button. If
-the CPU executes `STOP`, the window waits and the next new press wakes it.
+keys are not used by Catch. P pauses and shows the controls. H toggles that
+help text. M mutes. Losing window focus releases every button. If the CPU
+executes `STOP`, the window waits and the next new press wakes it.
 
 ## Cartridges and saves
 
-`gb_memory_load_cartridge` accepts the types whose header byte is `00`
-(ROM only), `08` and `09` (ROM plus external RAM, with or without a
-battery), `01` through `03` (MBC1, with or without RAM and a battery), and
-`0F`, `10`, `11`, `12`, and `13` (MBC3, including the timer variants).
-Anything else, including MBC5, is rejected. The file length must equal the
-header ROM size (32 KiB through 8 MiB). MBC1 bank 0 in the high window is
-bank 1, upper bits and the mode switch follow Pan Docs, and a bank number
-past the end of the file wraps by the number of 16 KiB banks. MBC3 bank 0
-is also bank 1. Its RAM and RTC registers are banked, and a `00` then `01`
-write on `6000`–`7FFF` latches the clock. External RAM reads as `FF` until
-the enable nibble is `0A`.
+`gb_memory_load_cartridge` accepts header types `00` (ROM only), `08` and
+`09` (ROM plus external RAM), `01` through `03` (MBC1), `0F`, `10`, `11`,
+`12`, and `13` (MBC3, including the timer variants), and `19` through `1E`
+(MBC5, including RAM and the rumble types). A rumble cartridge ignores RAM
+bank bit 3; there is no motor. Anything else is rejected with the type code
+in the message. A Game Boy Color-only header (`0x143` = `0xC0`) is rejected.
+A `.nes`, `.sfc`, `.smc`, or `.gba` file is rejected before the window
+opens. The file length must equal the header ROM size (32 KiB through
+8 MiB). MBC1 bank 0 in the high window is bank 1. MBC5 starts in bank 1, and
+a later write of 0 really selects bank 0. MBC3 bank 0 is bank 1. Its RAM and
+RTC registers are banked, and a `00` then `01` write on `6000`–`7FFF`
+latches the clock. External RAM reads as `FF` until the enable nibble is
+`0A`. MBC5 RAM uses the same enable write.
 
 A battery type writes a save beside the ROM: `game.gb` becomes `game.sav`
 (and `game.gbc` becomes `game.sav`; other names gain a `.sav` suffix). The
@@ -123,12 +128,29 @@ the ROM are ignored. Addresses `0xE000` through `0xFDFF` mirror part of RAM.
 `gb_memory.c` is the single routing point for these accesses. `DIV`, `TIMA`,
 `TMA`, and `TAC` (`FF04`–`FF07`) are the timer in `gb_timer.c`. LCDC, STAT,
 scroll, `LY`, DMA, and the palettes are the picture processor in `gb_ppu.c`.
-`FF00` is the joypad. The other I/O ports that are not the timer or the
-picture processor still store plain bytes. `gb_memory_init` is still the
-raw 32 KiB path used by unit tests and the ROM runner. Header-aware banking
-is `gb_memory_load_cartridge`. The clock contract is in `docs/TIMER.md` and
-`docs/PPU.md`: `gb_cpu_step` still reports T-cycles, and the timer, LCD, and
-DMA advance one machine cycle (4 T-cycles) at a time.
+`FF00` is the joypad. `FF10`–`FF3F` are the sound chip. The other I/O ports
+that are not the timer or the picture processor still store plain bytes.
+`gb_memory_init` is still the raw 32 KiB path used by unit tests. The ROM
+runner uses `gb_memory_load_cartridge` when the file matches a supported
+header, and the raw 32 KiB path otherwise. The clock contract is in
+`docs/TIMER.md` and `docs/PPU.md`: `gb_cpu_step` still reports T-cycles, and
+the timer, LCD, DMA, and audio advance one machine cycle (4 T-cycles) at a
+time.
+
+The core is one C library: the cartridge bus, CPU, timer, picture processor,
+and sound. The C++ file `app/main.cpp` only owns the SDL window, keyboard,
+and audio device. It does not contain game rules.
+
+## Sound
+
+The four DMG channels are generated in `gb_apu.c` and queued to SDL as
+signed 16-bit stereo at 32768 Hz. Length, envelope, channel-1 sweep, the
+wave RAM, and the noise polynomial follow Pan Docs closely enough to be
+recognizable. These parts are approximate: the 512 Hz sequencer is not tied
+to `DIV`, square and noise are centered around zero instead of the hardware
+DC offset, and there is no VIN pin. Turning `NR52` bit 7 off silences the
+channels and keeps wave RAM. If SDL cannot open a device, the window runs
+silent. M drops queued samples without muting the game's own registers.
 
 ## First CPU experiment
 
@@ -179,20 +201,62 @@ The timer acceptance ROMs do too: `div_write`, `rapid_toggle`, `tim00`,
 `tima_write_reloading`, and `tma_write_reloading`.
 
 `halt_ime0_ei` reports the pass signature (718384 T-cycles, 108444 steps).
-`oam_dma/basic`, `oam_dma/reg_read`, and `call_timing` pass as well.
-`call_timing` finished at 928732 T-cycles and 121092 steps. Echo RAM stays
-readable during DMA, so the `CALL` at `$FDFE` is fetched as an instruction,
-and OAM stays locked through the cycle that copies the last DMA byte.
-`oam_dma/sources-GS` still ends with the failure signature `0x42` (2417732
-T-cycles, 346925 steps). A DMA source of `$FE` is read through the WRAM
-mirror at `$DE00`, which is not the decode that test accepts. The extracted
-PPU timing ROMs also end at `0x42`: `hblank_ly_scx_timing-GS`,
-`intr_1_2_timing-GS`, `intr_2_0_timing`, `intr_2_mode0_timing`,
-`intr_2_mode0_timing_sprites`, `intr_2_mode3_timing`, `intr_2_oam_ok_timing`,
-`lcdon_timing-GS`, `lcdon_write_timing-GS`, `stat_irq_blocking`,
-`stat_lyc_onoff`, and `vblank_stat_intr-GS`. Mode 3 is a fixed 172 dots, so
-those cycle counts are not claimed as passes. The combined 64 KiB
-`cpu_instrs.gb` is not run: `cpu_rom_runner` still maps a raw 32 KiB image.
+`oam_dma/basic`, `oam_dma/reg_read`, `oam_dma/sources-GS`, and `call_timing`
+pass as well. `call_timing` finished at 928732 T-cycles and 121092 steps.
+`sources-GS` finished at 2544444 T-cycles and 363647 steps. The extracted
+PPU timing ROMs still end at `0x42`, with no timeouts: `hblank_ly_scx_timing-GS`
+(1216656 T-cycles), `intr_1_2_timing-GS` (943812), `intr_2_0_timing` (873596),
+`intr_2_mode0_timing` (873564), `intr_2_mode0_timing_sprites` (1446076),
+`intr_2_mode3_timing` (873556), `intr_2_oam_ok_timing` (873564),
+`lcdon_timing-GS` (1322184), `lcdon_write_timing-GS` (2517116),
+`stat_irq_blocking` (795320), `stat_lyc_onoff` (718832), and
+`vblank_stat_intr-GS` (1295668). Those are not passes. The combined 64 KiB
+`cpu_instrs.gb` is not in that list.
+
+## Homebrew that was actually played
+
+These are not claims that every Game Boy game runs. The ROMs are not stored
+in git. Catch is the one shipped here.
+
+- Catch, `examples/catch.gb`, ROM-only type `00`. Headless test reaches lose,
+  win, and a restart. Keyboard play uses the window.
+- 2048 by Sanqui, zlib license, 32 KiB MBC1+RAM+battery type `03`. Source
+  and the assembled URL are in `https://github.com/Sanqui/2048-gb`. After the
+  title, Start, Right, and Down each changed the frame. No samples were
+  produced in that session. No illegal opcode.
+- Droneboy 1.09 by purefunktion, MIT license, 32 KiB ROM-only type `00`.
+  Download `droneboy.gb` from the v1.09 GitHub release. The drone produces
+  samples from the first frames, and Right changes the picture. No illegal
+  opcode.
+
+Rhythm Land 1.0.1 (MIT, MBC5, 128 KiB) draws a static frame and then sits
+in `HALT` at `$0033`. Buttons did not change that frame and no samples were
+produced, so it is not listed as playable.
+
+## macOS package and screenshots
+
+```sh
+scripts/package_macos.sh
+```
+
+That writes `dist/pocketglass-macos-arm64/` with the arm64 executable,
+`libSDL3.0.dylib`, `catch.gb`, a short README, and the SDL3 license. Copy
+that folder somewhere that is not the source tree and run
+`./pocketglass catch.gb` from there.
+
+No demo video or GIF was recorded in this environment. To capture one after
+the window is open:
+
+```sh
+screencapture -x docs/images/catch.png
+# A short GIF, if ffmpeg is installed:
+ffmpeg -f avfoundation -i "1:none" -t 8 -vf "fps=12,scale=480:-1" docs/images/catch.gif
+```
+
+Checklist before adding media to the README: the Catch title is readable,
+the player moves, a coin or the block is on screen, the win or lose text is
+visible, the P-key help overlay is up, and the file is a real capture rather
+than a drawing. Until those files exist, this paragraph is the placeholder.
 
 ## First C lesson
 
