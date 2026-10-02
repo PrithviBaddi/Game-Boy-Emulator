@@ -72,6 +72,21 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         *cycles = 16;
         return GB_STEP_OK;
     }
+    case 0x3c:
+    { /* INC A */
+        uint8_t old_a = cpu->a;
+        cpu->a = (uint8_t)(old_a + 1);
+        cpu->f &= FLAG_C;
+
+        if (cpu->a == 0)
+            cpu->f |= FLAG_Z;
+        if ((old_a & 0x0f) == 0x0f)
+            cpu->f |= FLAG_H;
+
+        cpu->pc += 1;
+        *cycles = 4;
+        return GB_STEP_OK;
+    }
     case 0x76: /* HALT: wait until future interrupt handling wakes CPU */
         cpu->pc += 1;
         cpu->halted = true;

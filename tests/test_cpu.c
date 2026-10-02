@@ -50,5 +50,22 @@ int main(void)
     assert(cpu.pc == 0x102);
     assert(cycles == 8);
     assert(cpu.f == 0x10);
+    /* INC A: crossing 0x0f sets H and preserves C. */
+    rom[0x100] = 0x3c;
+    gb_cpu_init(&cpu);
+    cpu.a = 0x0f;
+    cpu.f = 0x10;
+    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    assert(cpu.a == 0x10);
+    assert(cpu.f == 0x30);
+    assert(cpu.pc == 0x101);
+    assert(cycles == 4);
+
+    /* INC A: 0xff wraps to zero, setting Z and H. */
+    gb_cpu_init(&cpu);
+    cpu.a = 0xff;
+    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    assert(cpu.a == 0);
+    assert(cpu.f == 0xa0);
     return 0;
 }
