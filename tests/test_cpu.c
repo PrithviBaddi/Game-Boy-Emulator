@@ -246,5 +246,46 @@ int main(void)
         assert(cycles == 12);
     }
 
+    /* Transfer A through BC, DE, HL+, and HL-. */
+    for (unsigned pair = 0; pair < 4; ++pair)
+    {
+        for (unsigned load = 0; load < 2; ++load)
+        {
+            rom[0x100] = (uint8_t)(0x02 | (pair << 4) | (load ? 0x08 : 0));
+            gb_cpu_init(&cpu);
+            cpu.a = 0x99;
+            cpu.b = 0xc1;
+            cpu.c = 0x23; /* BC = 0xC123 */
+            cpu.d = 0xc2;
+            cpu.e = 0x34; /* DE = 0xC234 */
+            cpu.h = 0xc3;
+            cpu.l = 0x45; /* HL = 0xC345 */
+            cpu.f = 0x10;
+
+            const uint16_t addresses[] = {0xc123, 0xc234, 0xc345, 0xc345};
+            uint16_t address = addresses[pair];
+            gb_memory_write(&memory, address, (uint8_t)(0x40 + pair));
+
+            assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+            if (load)
+            {
+                assert(cpu.a == (uint8_t)(0x40 + pair));
+            }
+            else
+            {
+                assert(gb_memory_read(&memory, address) == 0x99);
+            }
+
+            uint16_t hl = (uint16_t)((cpu.h << 8) | cpu.l);
+            if (pair == 2)
+                assert(hl == 0xc346); /* HL+ */
+            if (pair == 3)
+                assert(hl == 0xc344); /* HL- */
+            assert(cpu.pc == 0x101);
+            assert(cpu.f == 0x10);
+            assert(cycles == 8);
+        }
+    }
+
     return 0;
 }

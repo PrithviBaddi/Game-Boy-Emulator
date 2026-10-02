@@ -148,6 +148,44 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         *cycles = 12;
         return GB_STEP_OK;
     }
+    if ((opcode & 0xc7) == 0x02)
+    {
+        unsigned pair = (opcode >> 4) & 3u;
+        uint16_t address;
+
+        switch (pair)
+        {
+        case 0:
+            address = (uint16_t)((cpu->b << 8) | cpu->c);
+            break;
+        case 1:
+            address = (uint16_t)((cpu->d << 8) | cpu->e);
+            break;
+        default:
+            address = (uint16_t)((cpu->h << 8) | cpu->l);
+            break;
+        }
+
+        if (opcode & 0x08)
+        {
+            cpu->a = gb_memory_read(memory, address);
+        }
+        else
+        {
+            gb_memory_write(memory, address, cpu->a);
+        }
+
+        if (pair >= 2)
+        {
+            uint16_t next = (uint16_t)(address + (pair == 2 ? 1 : -1));
+            cpu->h = (uint8_t)(next >> 8);
+            cpu->l = (uint8_t)next;
+        }
+
+        cpu->pc += 1;
+        *cycles = 8;
+        return GB_STEP_OK;
+    }
     switch (opcode)
     {
     case 0x00: /* NOP: do nothing */
