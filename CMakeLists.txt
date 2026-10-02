@@ -6,7 +6,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_library(gbcore STATIC core/src/gb_bits.c core/src/gb_cartridge.c core/src/gb_memory.c core/src/gb_timer.c core/src/gb_cpu.c)
+add_library(gbcore STATIC core/src/gb_bits.c core/src/gb_cartridge.c core/src/gb_memory.c core/src/gb_timer.c core/src/gb_ppu.c core/src/gb_cpu.c)
 target_include_directories(gbcore PUBLIC core/include)
 target_compile_options(gbcore PRIVATE -Wall -Wextra -Wpedantic)
 
@@ -75,6 +75,13 @@ target_link_libraries(timer_tests PRIVATE gbcore)
 target_include_directories(timer_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
 target_compile_options(timer_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
 add_test(NAME timer_divider COMMAND timer_tests)
+
+add_executable(ppu_tests tests/test_ppu.c)
+target_link_libraries(ppu_tests PRIVATE gbcore)
+target_include_directories(ppu_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+target_compile_definitions(ppu_tests PRIVATE DEMO_ROM="${CMAKE_SOURCE_DIR}/examples/video-demo.gb")
+target_compile_options(ppu_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+add_test(NAME ppu_video_dma COMMAND ppu_tests)
 
 add_executable(cpu_demo examples/cpu_demo.c)
 target_link_libraries(cpu_demo PRIVATE gbcore)

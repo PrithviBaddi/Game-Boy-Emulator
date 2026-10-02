@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "gb_cpu.h"
+#include "gb_ppu.h"
 
 /* Headless runner for independent CPU ROMs.
  * Blargg cpu_instrs prints ASCII by writing SB (0xFF01) and then 0x81 to SC
@@ -92,8 +93,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "BLOCKED %s memory init failed\n", path);
         return 2;
     }
-    /* These ROMs are written to start where the boot ROM would have left the CPU. */
+    /* These ROMs are written to start where the boot ROM would have left the CPU
+     * and the LCD. LY starts at 0 with the LCD already on. */
     gb_cpu_init_dmg_post_boot(&cpu);
+    gb_ppu_apply_dmg_post_boot(&memory);
 
     char serial[8192];
     size_t serial_len = 0;

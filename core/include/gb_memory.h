@@ -21,6 +21,29 @@ typedef struct {
     bool reloading;        /* this machine cycle copied TMA into TIMA */
 } GbTimer;
 
+enum {
+    GB_LCD_WIDTH = 160,
+    GB_LCD_HEIGHT = 144
+};
+
+/* DMG picture processor and OAM DMA. Owned by the bus, same as the timer.
+ * mode3_stall_dots is the hook for later fetcher stalls; it is 0 until then,
+ * so mode 3 is a fixed 172 dots. */
+typedef struct {
+    uint8_t lcdc, stat, scy, scx, ly, lyc, dma, bgp, obp0, obp1, wy, wx;
+    uint16_t dot; /* 0..455, position within the current line, in dots */
+    uint16_t mode3_stall_dots;
+    uint8_t window_line;
+    uint8_t last_mode;
+    bool lcd_on;
+    bool frame_ready;
+    bool stat_mode0, stat_mode1, stat_mode2, stat_lyc;
+    uint8_t pixels[GB_LCD_WIDTH * GB_LCD_HEIGHT]; /* shade 0..3 after the palette */
+    bool dma_active;
+    uint8_t dma_page;
+    uint8_t dma_offset;
+} GbPpu;
+
 /* Initial memory bus for an original Game Boy with a 32 KiB ROM-only cart. */
 typedef struct {
     const uint8_t *rom;  /* borrowed: caller keeps cartridge bytes alive */
@@ -32,6 +55,7 @@ typedef struct {
     uint8_t hram[0x7f];
     uint8_t interrupt_enable;
     GbTimer timer;
+    GbPpu ppu;
 } GbMemory;
 
 /* Returns false for a missing or incorrectly sized ROM. */

@@ -1,6 +1,7 @@
 #include "gb_timer.h"
 
 #include "gb_cpu.h"
+#include "gb_ppu.h"
 
 /* Falling edges of these bits of the T-cycle counter increment TIMA.
  * Periods are 1024, 16, 64, and 256 T-cycles, which is 256, 4, 16, and 64
@@ -41,6 +42,7 @@ static void machine_cycle(GbMemory *memory)
     timer->counter = (uint16_t)(timer->counter + 4);
     if (timer_signal(previous, timer->tac) && !timer_signal(timer->counter, timer->tac))
         increment_tima(timer);
+    gb_ppu_on_machine_cycle(memory);
 }
 
 void gb_timer_advance(GbMemory *memory, unsigned t_cycles)
