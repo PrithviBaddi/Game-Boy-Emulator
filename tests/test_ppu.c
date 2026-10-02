@@ -99,6 +99,52 @@ static int test_stat_and_lcd_toggle(void)
     return 0;
 }
 
+static int test_line_153_stat_and_mode3(void)
+{
+    uint8_t rom[0x8000];
+    GbMemory memory;
+    GB_REQUIRE(fresh(rom, &memory) == 0);
+    GB_REQUIRE(enable_lcd(&memory, 0x80) == 0);
+    gb_memory_write(&memory, 0xff0f, 0);
+    gb_timer_advance(&memory, 153 * 456);
+    GB_REQUIRE(gb_memory_read(&memory, 0xff44) == 153);
+    GB_REQUIRE((gb_memory_read(&memory, 0xff41) & 0x03) == 1);
+    gb_timer_advance(&memory, 4);
+    GB_REQUIRE(gb_memory_read(&memory, 0xff44) == 0);
+    GB_REQUIRE((gb_memory_read(&memory, 0xff41) & 0x03) == 1);
+
+    GB_REQUIRE(fresh(rom, &memory) == 0);
+    gb_memory_write(&memory, 0xff45, 0);
+    gb_memory_write(&memory, 0xff41, 0x40);
+    GB_REQUIRE(enable_lcd(&memory, 0x80) == 0);
+    GB_REQUIRE((gb_memory_read(&memory, 0xff0f) & 0x02) == 0x02);
+    gb_memory_write(&memory, 0xff0f, 0);
+    gb_memory_write(&memory, 0xff41, 0x60); /* mode 2 is also true; the line stays high */
+    GB_REQUIRE((gb_memory_read(&memory, 0xff0f) & 0x02) == 0);
+    gb_memory_write(&memory, 0xff41, 0x00);
+    gb_memory_write(&memory, 0xff0f, 0);
+    gb_memory_write(&memory, 0xff41, 0x20);
+    GB_REQUIRE((gb_memory_read(&memory, 0xff0f) & 0x02) == 0x02);
+
+    GB_REQUIRE(fresh(rom, &memory) == 0);
+    gb_memory_write(&memory, 0xff43, 4);
+    GB_REQUIRE(enable_lcd(&memory, 0x91) == 0);
+    gb_timer_advance(&memory, 80);
+    GB_REQUIRE((gb_memory_read(&memory, 0xff41) & 0x03) == 3);
+    gb_timer_advance(&memory, 172);
+    GB_REQUIRE((gb_memory_read(&memory, 0xff41) & 0x03) == 3);
+    gb_timer_advance(&memory, 4);
+    GB_REQUIRE((gb_memory_read(&memory, 0xff41) & 0x03) == 0);
+
+    GB_REQUIRE(fresh(rom, &memory) == 0);
+    memory.oam[0] = 16;
+    memory.oam[1] = 0;
+    GB_REQUIRE(enable_lcd(&memory, 0x82) == 0);
+    gb_timer_advance(&memory, 80 + 172);
+    GB_REQUIRE((gb_memory_read(&memory, 0xff41) & 0x03) == 3);
+    return 0;
+}
+
 static int test_access_boundaries(void)
 {
     uint8_t rom[0x8000];
@@ -138,8 +184,9 @@ static uint8_t pixel(const GbMemory *memory, unsigned x, unsigned y)
 
 static int render_line(GbMemory *memory, unsigned line)
 {
-    uint32_t need = (uint32_t)(line * 456u + 252u);
-    gb_timer_advance(memory, need);
+    /* Finish the whole line. Mode 3 can run past dot 252 when scroll, the
+     * window, or objects stall the fetcher. */
+    gb_timer_advance(memory, (line + 1u) * 456u);
     return 0;
 }
 
@@ -382,6 +429,7 @@ int main(void)
 {
     if (test_line_and_frame_timing() != 0) return 1;
     if (test_stat_and_lcd_toggle() != 0) return 1;
+    if (test_line_153_stat_and_mode3() != 0) return 1;
     if (test_access_boundaries() != 0) return 1;
     if (test_background_and_window() != 0) return 1;
     if (test_objects() != 0) return 1;

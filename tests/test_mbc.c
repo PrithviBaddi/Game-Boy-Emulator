@@ -1,6 +1,8 @@
 #include "gb_check.h"
 #include "gb_cartridge.h"
 #include "gb_memory.h"
+#include "gb_ppu.h"
+#include "gb_timer.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -91,8 +93,16 @@ static int test_rom_ram_and_errors(void)
     GB_REQUIRE(gb_memory_read(&memory, 0xa7ff) == 0x99);
     free(rom);
 
-    rom = blank(0x8000, 0x19, 0, 0);
+    rom = blank(0x8000, 0x22, 0, 0);
     GB_REQUIRE(!gb_memory_load_cartridge(&memory, rom, 0x8000, error, sizeof error));
+    GB_REQUIRE(strstr(error, "0x22") != NULL);
+    free(rom);
+
+    rom = blank(0x8000, 0x00, 0, 0);
+    rom[0x143] = 0xc0;
+    checksum(rom);
+    GB_REQUIRE(!gb_memory_load_cartridge(&memory, rom, 0x8000, error, sizeof error));
+    GB_REQUIRE(strstr(error, "Game Boy Color") != NULL);
     free(rom);
 
     rom = blank(0x8000, 0x01, 1, 0);
@@ -180,9 +190,51 @@ static int test_rtc_latch(void)
     return 0;
 }
 
+static int test_mbc5_and_dma_sources(void)
+{
+    uint8_t *rom = blank(0x10000, 0x19, 1, 0);
+    GB_REQUIRE(rom != NULL);
+    rom[0x0000] = 0x11;
+    rom[0x4000] = 0x22;
+    GbMemory memory;
+    char error[160];
+    GB_REQUIRE(gb_memory_load_cartridge(&memory, rom, 0x10000, error, sizeof error));
+    /* Bank 1 is visible until a write. Writing 0 selects bank 0. */
+    GB_REQUIRE(gb_memory_read(&memory, 0x4000) == 0x22);
+    gb_memory_write(&memory, 0x2000, 0);
+    GB_REQUIRE(gb_memory_read(&memory, 0x4000) == 0x11);
+    gb_memory_write(&memory, 0x2000, 1);
+    GB_REQUIRE(gb_memory_read(&memory, 0x4000) == 0x22);
+    free(rom);
+
+    rom = blank(0x8000, 0x1b, 0, 2);
+    GB_REQUIRE(rom != NULL);
+    GB_REQUIRE(gb_memory_load_cartridge(&memory, rom, 0x8000, error, sizeof error));
+    gb_memory_write(&memory, 0x0000, 0x0a);
+    gb_memory_write(&memory, 0xa000, 0x5a);
+    gb_memory_write(&memory, 0xff46, 0xa0);
+    gb_timer_advance(&memory, 8);
+    GB_REQUIRE(memory.oam[0] == 0x5a);
+    memory.wram[0x1e00] = 0x3c;
+    gb_memory_write(&memory, 0xff46, 0xfe);
+    gb_timer_advance(&memory, 8);
+    GB_REQUIRE(memory.oam[0] == 0x3c);
+    memory.wram[0x1f00] = 0x2b;
+    gb_memory_write(&memory, 0xff46, 0xff);
+    gb_timer_advance(&memory, 8);
+    GB_REQUIRE(memory.oam[0] == 0x2b);
+    gb_memory_write(&memory, 0x0000, 0x00);
+    gb_memory_write(&memory, 0xff46, 0xa0);
+    gb_timer_advance(&memory, 8);
+    GB_REQUIRE(memory.oam[0] == 0xff);
+    free(rom);
+    return 0;
+}
+
 int main(void)
 {
     if (test_banks() != 0) return 1;
+    if (test_mbc5_and_dma_sources() != 0) return 1;
     if (test_rom_ram_and_errors() != 0) return 1;
     if (test_save_round_trip() != 0) return 1;
     if (test_rtc_latch() != 0) return 1;

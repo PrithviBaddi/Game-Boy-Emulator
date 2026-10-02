@@ -27,8 +27,9 @@ enum {
 };
 
 /* DMG picture processor and OAM DMA. Owned by the bus, same as the timer.
- * mode3_stall_dots is the hook for later fetcher stalls; it is 0 until then,
- * so mode 3 is a fixed 172 dots. */
+ * mode3_stall_dots is the extra Mode 3 length for this line: SCX % 8,
+ * a window trigger, and the object penalties from Pan Docs. It is latched
+ * when Mode 3 begins. Mode is still sampled once per machine cycle. */
 typedef struct {
     uint8_t lcdc, stat, scy, scx, ly, lyc, dma, bgp, obp0, obp1, wy, wx;
     uint16_t dot; /* 0..455, position within the current line, in dots */
@@ -37,7 +38,8 @@ typedef struct {
     uint8_t last_mode;
     bool lcd_on;
     bool frame_ready;
-    bool stat_mode0, stat_mode1, stat_mode2, stat_lyc;
+    bool stat_line; /* combined STAT sources; interrupt is the rising edge */
+    bool mode3_latched;
     uint8_t pixels[GB_LCD_WIDTH * GB_LCD_HEIGHT]; /* shade 0..3 after the palette */
     bool dma_active;
     bool dma_wait;   /* the cycle after FF46, before the first copied byte */
@@ -62,7 +64,8 @@ enum {
 typedef enum {
     GB_MAPPER_ROM = 0,
     GB_MAPPER_MBC1,
-    GB_MAPPER_MBC3
+    GB_MAPPER_MBC3,
+    GB_MAPPER_MBC5
 } GbMapper;
 
 /* Cartridge banking and external RAM. ROM bytes stay owned by the caller.
@@ -76,7 +79,9 @@ typedef struct {
     bool save_blocked; /* a mismatched save was not loaded; do not overwrite it */
     uint32_t ram_bytes;
     uint8_t rom_bank;
+    uint8_t rom_bank_hi; /* MBC5 bank bit 8 */
     uint8_t ram_bank;
+    bool rumble; /* MBC5 rumble bit is ignored; there is no motor */
     uint8_t mode; /* MBC1: 0 simple ROM banking, 1 RAM banking */
     uint8_t joy_select; /* FF00 bits 4–5; 0 selects that group */
     uint8_t joy_pressed;
@@ -87,8 +92,46 @@ typedef struct {
     uint8_t eram[0x8000];
 } GbCart;
 
+/* Four DMG sound channels. The sequencer is a 512 Hz divider, not the real
+ * DIV-edge clock. Square and noise are centered around zero instead of the
+ * hardware DC offset. See gb_apu.h. */
+typedef struct {
+    bool power;
+    uint8_t nr50, nr51;
+    uint16_t frame_cycles;
+    uint8_t frame_step;
+    uint8_t sample_div;
+    int16_t sample_left[1024];
+    int16_t sample_right[1024];
+    unsigned sample_write;
+    unsigned sample_count;
+    uint8_t wave[16];
+    bool on[4];
+    bool dac[4];
+    bool length_on[4];
+    bool env_add[4];
+    uint8_t duty[4];
+    uint8_t duty_pos[4];
+    uint8_t volume[4];
+    uint8_t env_start[4];
+    uint8_t env_period[4];
+    uint8_t env_timer[4];
+    uint8_t wave_level;
+    uint8_t wave_pos;
+    uint8_t noise_divisor;
+    uint8_t noise_shift;
+    bool noise_short;
+    uint16_t lfsr;
+    uint16_t freq[4];
+    uint16_t length_timer[4];
+    uint32_t period_timer[4];
+    uint8_t sweep_period, sweep_timer, sweep_shift;
+    bool sweep_negate, sweep_enabled;
+    uint16_t sweep_shadow;
+} GbApu;
+
 /* Bus for a DMG. gb_memory_init maps a raw 32 KiB ROM with no header check.
- * gb_memory_load_cartridge maps a header and supports ROM, MBC1, and MBC3. */
+ * gb_memory_load_cartridge maps a header and supports ROM, MBC1, MBC3, and MBC5. */
 typedef struct {
     const uint8_t *rom;  /* borrowed: caller keeps cartridge bytes alive */
     size_t rom_size;
@@ -100,6 +143,7 @@ typedef struct {
     uint8_t interrupt_enable;
     GbTimer timer;
     GbPpu ppu;
+    GbApu apu;
     GbCart cart;
 } GbMemory;
 

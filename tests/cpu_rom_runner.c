@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "gb_cartridge.h"
 #include "gb_cpu.h"
 #include "gb_ppu.h"
 
@@ -87,7 +88,21 @@ int main(int argc, char **argv)
 
     GbMemory memory;
     GbCpu cpu;
-    if (!gb_memory_init(&memory, rom, 0x8000))
+    /* Prefer the header mapper when the file is a complete supported cartridge,
+     * so MBC5 RAM in sources-GS is actually there. Shorter CPU ROMs stay on
+     * the padded 32 KiB path. */
+    GbCartridgeHeader header;
+    bool mapped = false;
+    if (gb_cartridge_parse_header(rom, file_size, &header) && header.checksum_valid)
+    {
+        size_t expected = gb_cartridge_rom_bytes(header.rom_size_code);
+        if (expected != 0 && file_size == expected)
+        {
+            char error[160];
+            mapped = gb_memory_load_cartridge(&memory, rom, file_size, error, sizeof error);
+        }
+    }
+    if (!mapped && !gb_memory_init(&memory, rom, 0x8000))
     {
         free(rom);
         fprintf(stderr, "BLOCKED %s memory init failed\n", path);

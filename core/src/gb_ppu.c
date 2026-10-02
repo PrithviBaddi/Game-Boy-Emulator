@@ -179,32 +179,123 @@ static void render_scanline(GbMemory *memory)
         ppu->pixels[ly * GB_LCD_WIDTH + x] = out[x];
 }
 
-static void raise_stat(GbMemory *memory, bool condition, bool *previous)
+static uint8_t visible_ly(const GbPpu *ppu)
 {
-    if (condition && !*previous)
-        gb_cpu_request_interrupt(memory, GB_INT_STAT);
-    *previous = condition;
+    if (!ppu->lcd_on)
+        return 0;
+    /* Line 153 drives LY as 153 for the first 4 dots, then as 0. */
+    if (ppu->ly == 153 && ppu->dot >= 4)
+        return 0;
+    return ppu->ly;
 }
 
-static void update_stat_edges(GbMemory *memory, int mode)
+static int floor_tile(int map_x)
 {
-    GbPpu *ppu = &memory->ppu;
-    if (!ppu->lcd_on)
+    if (map_x >= 0)
+        return map_x / 8;
+    return -(((-map_x) + 7) / 8);
+}
+
+static unsigned mode3_penalty(const GbMemory *memory)
+{
+    const GbPpu *ppu = &memory->ppu;
+    unsigned extra = (unsigned)(ppu->scx & 7u);
+    unsigned ly = ppu->ly;
+    bool window = (ppu->lcdc & 0x20) != 0 && ly >= ppu->wy && ppu->wx <= 166;
+    if (window)
+        extra += 6;
+    if ((ppu->lcdc & 0x02) == 0 || ly >= GB_LCD_HEIGHT)
+        return extra;
+
+    unsigned height = (ppu->lcdc & 0x04) ? 16u : 8u;
+    unsigned order[10];
+    unsigned count = 0;
+    for (unsigned i = 0; i < 40 && count < 10; ++i)
     {
-        ppu->stat_mode0 = ppu->stat_mode1 = ppu->stat_mode2 = ppu->stat_lyc = false;
-        return;
+        int top = (int)memory->oam[i * 4u] - 16;
+        if ((int)ly >= top && (unsigned)((int)ly - top) < height)
+            order[count++] = i;
     }
-    bool lyc = ppu->ly == ppu->lyc;
-    raise_stat(memory, mode == 0 && (ppu->stat & 0x08), &ppu->stat_mode0);
-    raise_stat(memory, mode == 1 && (ppu->stat & 0x10), &ppu->stat_mode1);
-    raise_stat(memory, mode == 2 && (ppu->stat & 0x20), &ppu->stat_mode2);
-    raise_stat(memory, lyc && (ppu->stat & 0x40), &ppu->stat_lyc);
+    for (unsigned a = 0; a < count; ++a)
+    {
+        for (unsigned b = a + 1; b < count; ++b)
+        {
+            uint8_t xa = memory->oam[order[a] * 4u + 1];
+            uint8_t xb = memory->oam[order[b] * 4u + 1];
+            if (xb < xa || (xb == xa && order[b] < order[a]))
+            {
+                unsigned swap = order[a];
+                order[a] = order[b];
+                order[b] = swap;
+            }
+        }
+    }
+    int seen_tile[10];
+    int seen_kind[10];
+    unsigned seen = 0;
+    for (unsigned n = 0; n < count; ++n)
+    {
+        uint8_t sprite_x = memory->oam[order[n] * 4u + 1];
+        if (sprite_x == 0)
+        {
+            extra += 11;
+            continue;
+        }
+        int pixel = (int)sprite_x - 8;
+        int window_x = (int)ppu->wx - 7;
+        bool in_window = window && pixel >= window_x;
+        int map_x = in_window ? pixel - window_x : (int)ppu->scx + pixel;
+        int tile = floor_tile(map_x);
+        int pos = map_x - tile * 8;
+        int kind = in_window ? 1 : 0;
+        bool fresh = true;
+        for (unsigned s = 0; s < seen; ++s)
+        {
+            if (seen_tile[s] == tile && seen_kind[s] == kind)
+                fresh = false;
+        }
+        if (fresh)
+        {
+            int penalty = 7 - pos - 2;
+            if (penalty > 0)
+                extra += (unsigned)penalty;
+            if (seen < 10)
+            {
+                seen_tile[seen] = tile;
+                seen_kind[seen] = kind;
+                seen++;
+            }
+        }
+        extra += 6;
+    }
+    return extra;
+}
+
+static bool stat_sources(const GbMemory *memory)
+{
+    const GbPpu *ppu = &memory->ppu;
+    if (!ppu->lcd_on)
+        return false;
+    int mode = gb_ppu_mode(memory);
+    bool lyc = visible_ly(ppu) == ppu->lyc;
+    return (mode == 0 && (ppu->stat & 0x08)) || (mode == 1 && (ppu->stat & 0x10)) ||
+           (mode == 2 && (ppu->stat & 0x20)) || (lyc && (ppu->stat & 0x40));
+}
+
+static void refresh_stat(GbMemory *memory)
+{
+    bool now = stat_sources(memory);
+    if (now && !memory->ppu.stat_line)
+        gb_cpu_request_interrupt(memory, GB_INT_STAT);
+    memory->ppu.stat_line = now;
 }
 
 static void next_line(GbMemory *memory)
 {
     GbPpu *ppu = &memory->ppu;
     ppu->dot = 0;
+    ppu->mode3_latched = false;
+    ppu->mode3_stall_dots = 0;
     ppu->ly++;
     if (ppu->ly == LINES_PER_FRAME)
     {
@@ -227,13 +318,17 @@ static void step_lcd(GbMemory *memory)
     ppu->dot = (uint16_t)(ppu->dot + 4);
     if (ppu->dot >= DOTS_PER_LINE)
         next_line(memory);
+    if (ppu->lcd_on && ppu->ly < GB_LCD_HEIGHT && ppu->dot >= MODE2_DOTS && !ppu->mode3_latched)
+    {
+        ppu->mode3_stall_dots = (uint16_t)mode3_penalty(memory);
+        ppu->mode3_latched = true;
+    }
     /* Render on the cycle that lands in HBlank, so the completed line is
      * already in the buffer when a register read first sees mode 0.
-     * STAT edges are checked after the line change, so a coincidence or a
-     * mode-2 source sees the line that this cycle entered. */
+     * The STAT line is checked after the line change. */
     if (before == 3 && gb_ppu_mode(memory) == 0)
         render_scanline(memory);
-    update_stat_edges(memory, gb_ppu_mode(memory));
+    refresh_stat(memory);
 }
 
 static void step_dma(GbMemory *memory)
@@ -296,7 +391,7 @@ uint8_t gb_ppu_read(const GbMemory *memory, uint16_t address)
     {
         uint8_t value = (uint8_t)((ppu->stat & 0x78) | 0x80);
         value = (uint8_t)(value | (gb_ppu_mode(memory) & 0x03));
-        if (ppu->ly == ppu->lyc)
+        if (visible_ly(ppu) == ppu->lyc)
             value = (uint8_t)(value | 0x04);
         return value;
     }
@@ -305,7 +400,7 @@ uint8_t gb_ppu_read(const GbMemory *memory, uint16_t address)
     case 0xff43:
         return ppu->scx;
     case 0xff44:
-        return ppu->lcd_on ? ppu->ly : 0;
+        return visible_ly(ppu);
     case 0xff45:
         return ppu->lyc;
     case 0xff46:
@@ -330,7 +425,9 @@ static void lcd_off(GbPpu *ppu)
     ppu->dot = 0;
     ppu->last_mode = 0;
     ppu->window_line = 0;
-    ppu->stat_mode0 = ppu->stat_mode1 = ppu->stat_mode2 = ppu->stat_lyc = false;
+    ppu->mode3_latched = false;
+    ppu->mode3_stall_dots = 0;
+    ppu->stat_line = false;
 }
 
 void gb_ppu_write(GbMemory *memory, uint16_t address, uint8_t value)
@@ -343,16 +440,23 @@ void gb_ppu_write(GbMemory *memory, uint16_t address, uint8_t value)
             lcd_off(ppu);
         else if ((ppu->lcdc & 0x80) == 0 && (value & 0x80))
         {
+            /* The first line starts at LY 0 in mode 2. There is no extra
+             * blanking delay before that mode; the STAT line is recomputed. */
             ppu->lcd_on = true;
             ppu->ly = 0;
             ppu->dot = 0;
             ppu->last_mode = 2;
             ppu->window_line = 0;
+            ppu->mode3_latched = false;
+            ppu->mode3_stall_dots = 0;
+            ppu->stat_line = false;
         }
         ppu->lcdc = value;
+        refresh_stat(memory);
         break;
     case 0xff41:
         ppu->stat = (uint8_t)(value & 0x78);
+        refresh_stat(memory);
         break;
     case 0xff42:
         ppu->scy = value;
@@ -364,6 +468,7 @@ void gb_ppu_write(GbMemory *memory, uint16_t address, uint8_t value)
         break;
     case 0xff45:
         ppu->lyc = value;
+        refresh_stat(memory);
         break;
     case 0xff46:
     ppu->dma = value;

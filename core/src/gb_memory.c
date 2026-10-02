@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include "gb_apu.h"
 #include "gb_cartridge.h"
 #include "gb_cpu.h"
 #include "gb_ppu.h"
@@ -16,6 +17,11 @@ static bool timer_address(uint16_t address)
 static bool ppu_address(uint16_t address)
 {
     return address == 0xff40 || (address >= 0xff41 && address <= 0xff4b);
+}
+
+static bool apu_address(uint16_t address)
+{
+    return address >= 0xff10 && address <= 0xff3f;
 }
 
 static unsigned rom_banks(const GbMemory *memory)
@@ -96,6 +102,11 @@ static unsigned mapped_rom_bank(const GbMemory *memory, uint16_t address)
     }
     if (memory->cart.mapper == GB_MAPPER_MBC1)
         return mbc1_high_bank(memory);
+    if (memory->cart.mapper == GB_MAPPER_MBC5)
+    {
+        unsigned bank = ((unsigned)memory->cart.rom_bank_hi << 8) | memory->cart.rom_bank;
+        return bank & (count - 1u);
+    }
     unsigned bank = memory->cart.rom_bank & 0x7fu;
     if (bank == 0)
         bank = 1;
@@ -158,6 +169,8 @@ static bool external_offset(const GbMemory *memory, uint16_t address, size_t *of
         bank = memory->cart.ram_bank & 0x03u;
     else if (memory->cart.mapper == GB_MAPPER_MBC3)
         bank = memory->cart.ram_bank & 0x03u;
+    else if (memory->cart.mapper == GB_MAPPER_MBC5)
+        bank = memory->cart.ram_bank & 0x0fu;
     if (memory->cart.ram_bytes <= 0x800u)
         *offset = address & 0x7ffu;
     else
@@ -213,16 +226,30 @@ static void write_mapper(GbMemory *memory, uint16_t address, uint8_t value)
         memory->cart.ram_enable = (value & 0x0f) == 0x0a;
     else if (address < 0x4000)
     {
-        if (memory->cart.mapper == GB_MAPPER_MBC1)
+        if (memory->cart.mapper == GB_MAPPER_MBC5)
+        {
+            if (address < 0x3000)
+                memory->cart.rom_bank = value;
+            else
+                memory->cart.rom_bank_hi = (uint8_t)(value & 0x01);
+        }
+        else if (memory->cart.mapper == GB_MAPPER_MBC1)
             memory->cart.rom_bank = (uint8_t)(value & 0x1f);
         else
             memory->cart.rom_bank = (uint8_t)(value & 0x7f);
     }
     else if (address < 0x6000)
-        memory->cart.ram_bank = (uint8_t)(value & (memory->cart.mapper == GB_MAPPER_MBC1 ? 0x03 : 0x0f));
+    {
+        if (memory->cart.mapper == GB_MAPPER_MBC1)
+            memory->cart.ram_bank = (uint8_t)(value & 0x03);
+        else if (memory->cart.mapper == GB_MAPPER_MBC5)
+            memory->cart.ram_bank = (uint8_t)(value & (memory->cart.rumble ? 0x07 : 0x0f));
+        else
+            memory->cart.ram_bank = (uint8_t)(value & 0x0f);
+    }
     else if (memory->cart.mapper == GB_MAPPER_MBC1)
         memory->cart.mode = (uint8_t)(value & 0x01);
-    else
+    else if (memory->cart.mapper == GB_MAPPER_MBC3)
     {
         if (memory->cart.rtc_latch_prev == 0 && value == 1)
         {
@@ -233,9 +260,9 @@ static void write_mapper(GbMemory *memory, uint16_t address, uint8_t value)
     }
 }
 
-static bool kind_of(uint8_t type, GbMapper *mapper, bool *ram, bool *battery, bool *rtc)
+static bool kind_of(uint8_t type, GbMapper *mapper, bool *ram, bool *battery, bool *rtc, bool *rumble)
 {
-    *ram = *battery = *rtc = false;
+    *ram = *battery = *rtc = *rumble = false;
     switch (type)
     {
     case 0x00: *mapper = GB_MAPPER_ROM; return true;
@@ -249,6 +276,12 @@ static bool kind_of(uint8_t type, GbMapper *mapper, bool *ram, bool *battery, bo
     case 0x11: *mapper = GB_MAPPER_MBC3; return true;
     case 0x12: *mapper = GB_MAPPER_MBC3; *ram = true; return true;
     case 0x13: *mapper = GB_MAPPER_MBC3; *ram = true; *battery = true; return true;
+    case 0x19: *mapper = GB_MAPPER_MBC5; return true;
+    case 0x1a: *mapper = GB_MAPPER_MBC5; *ram = true; return true;
+    case 0x1b: *mapper = GB_MAPPER_MBC5; *ram = true; *battery = true; return true;
+    case 0x1c: *mapper = GB_MAPPER_MBC5; *rumble = true; return true;
+    case 0x1d: *mapper = GB_MAPPER_MBC5; *ram = true; *rumble = true; return true;
+    case 0x1e: *mapper = GB_MAPPER_MBC5; *ram = true; *battery = true; *rumble = true; return true;
     default: return false;
     }
 }
@@ -280,12 +313,19 @@ bool gb_memory_load_cartridge(GbMemory *memory, const uint8_t *rom, size_t rom_s
         return set_error(error, error_size, "Cartridge header is incomplete.");
     if (!header.checksum_valid)
         return set_error(error, error_size, "Cartridge header checksum is invalid.");
-    GbMapper mapper = GB_MAPPER_ROM;
-    bool ram = false, battery = false, rtc = false;
-    if (!kind_of(header.cartridge_type, &mapper, &ram, &battery, &rtc))
+    if (rom_size > 0x143 && rom[0x143] == 0xc0)
         return set_error(error, error_size,
-                         "Unsupported cartridge type. Supported types are ROM-only, "
-                         "ROM+RAM, MBC1, and MBC3.");
+                         "This is a Game Boy Color-only cartridge. Pocketglass runs original DMG games.");
+    GbMapper mapper = GB_MAPPER_ROM;
+    bool ram = false, battery = false, rtc = false, rumble = false;
+    if (!kind_of(header.cartridge_type, &mapper, &ram, &battery, &rtc, &rumble))
+    {
+        char text[120];
+        snprintf(text, sizeof text,
+                 "Unsupported cartridge type 0x%02X. Supported types are ROM-only, ROM+RAM, MBC1, MBC3, and MBC5.",
+                 header.cartridge_type);
+        return set_error(error, error_size, text);
+    }
     size_t expected = gb_cartridge_rom_bytes(header.rom_size_code);
     if (expected == 0 || rom_size != expected)
         return set_error(error, error_size, "ROM file size does not match the header.");
@@ -307,10 +347,15 @@ bool gb_memory_load_cartridge(GbMemory *memory, const uint8_t *rom, size_t rom_s
     memory->cart.has_ram = ram;
     memory->cart.battery = battery;
     memory->cart.has_rtc = rtc;
+    memory->cart.rumble = rumble;
     memory->cart.ram_bytes = ram ? (uint32_t)ram_bytes : 0;
     memory->cart.rtc_unix = (int64_t)time(NULL);
     if (mapper == GB_MAPPER_ROM && ram)
         memory->cart.ram_enable = true;
+    /* MBC5 powers up showing bank 1 in the high window. A later write of 0
+     * really does select bank 0, which MBC1 does not. */
+    if (mapper == GB_MAPPER_MBC5)
+        memory->cart.rom_bank = 1;
     return true;
 }
 
@@ -368,6 +413,8 @@ uint8_t gb_memory_read(const GbMemory *memory, uint16_t address)
             return gb_timer_read(memory, address);
         if (ppu_address(address))
             return gb_ppu_read(memory, address);
+        if (apu_address(address))
+            return gb_apu_read(memory, address);
         uint8_t value = memory->io[address - 0xff00];
         if (address == 0xff0f)
             return (uint8_t)(value | 0xe0);
@@ -426,6 +473,11 @@ void gb_memory_write(GbMemory *memory, uint16_t address, uint8_t value)
         if (ppu_address(address))
         {
             gb_ppu_write(memory, address, value);
+            return;
+        }
+        if (apu_address(address))
+        {
+            gb_apu_write(memory, address, value);
             return;
         }
         if (address == 0xff0f)

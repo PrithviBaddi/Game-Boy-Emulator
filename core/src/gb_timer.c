@@ -1,5 +1,6 @@
 #include "gb_timer.h"
 
+#include "gb_apu.h"
 #include "gb_cpu.h"
 #include "gb_ppu.h"
 
@@ -43,6 +44,7 @@ static void machine_cycle(GbMemory *memory)
     if (timer_signal(previous, timer->tac) && !timer_signal(timer->counter, timer->tac))
         increment_tima(timer);
     gb_ppu_on_machine_cycle(memory);
+    gb_apu_on_machine_cycle(memory);
 }
 
 void gb_timer_advance(GbMemory *memory, unsigned t_cycles)
