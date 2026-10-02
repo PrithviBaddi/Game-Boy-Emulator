@@ -192,37 +192,91 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         cpu->pc += 1;
         *cycles = 4;
         return GB_STEP_OK;
-    // case 0x3e: /* LD A,d8: load the following byte into register A */
-    //     cpu->a = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
-    //     cpu->pc += 2;
-    //     *cycles = 8;
-    //     return GB_STEP_OK;
-    // case 0x06: /* LD B,d8 */
-    //     cpu->b = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
-    //     cpu->pc += 2;
-    //     *cycles = 8;
-    //     return GB_STEP_OK;
-    // case 0x0e: /* LD C,d8: put the next byte into register C */
-    //     cpu->c = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
-    //     cpu->pc += 2;
-    //     *cycles = 8;
-    //     return GB_STEP_OK;
-    // case 0x80:
-    // { /* ADD A,B: update result and Z/N/H/C flags */
-    //     unsigned result = (unsigned)cpu->a + cpu->b;
-    //     uint8_t flags = 0;
-    //     if ((uint8_t)result == 0)
-    //         flags |= FLAG_Z;
-    //     if (((cpu->a & 0x0f) + (cpu->b & 0x0f)) > 0x0f)
-    //         flags |= FLAG_H;
-    //     if (result > 0xff)
-    //         flags |= FLAG_C;
-    //     cpu->a = (uint8_t)result;
-    //     cpu->f = flags; /* addition clears N */
-    //     cpu->pc += 1;
-    //     *cycles = 4;
-    //     return GB_STEP_OK;
-    // }
+
+        // case 0x3e: /* LD A,d8: load the following byte into register A */
+        //     cpu->a = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
+        //     cpu->pc += 2;
+        //     *cycles = 8;
+        //     return GB_STEP_OK;
+        // case 0x06: /* LD B,d8 */
+        //     cpu->b = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
+        //     cpu->pc += 2;
+        //     *cycles = 8;
+        //     return GB_STEP_OK;
+        // case 0x0e: /* LD C,d8: put the next byte into register C */
+        //     cpu->c = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
+        //     cpu->pc += 2;
+        //     *cycles = 8;
+        //     return GB_STEP_OK;
+        // case 0x80:
+        // { /* ADD A,B: update result and Z/N/H/C flags */
+        //     unsigned result = (unsigned)cpu->a + cpu->b;
+        //     uint8_t flags = 0;
+        //     if ((uint8_t)result == 0)
+        //         flags |= FLAG_Z;
+        //     if (((cpu->a & 0x0f) + (cpu->b & 0x0f)) > 0x0f)
+        //         flags |= FLAG_H;
+        //     if (result > 0xff)
+        //         flags |= FLAG_C;
+        //     cpu->a = (uint8_t)result;
+        //     cpu->f = flags; /* addition clears N */
+        //     cpu->pc += 1;
+        //     *cycles = 4;
+        //     return GB_STEP_OK;
+        // }
+    case 0xe0:
+    case 0xf0:
+    { /* LDH A,(a8) */
+        uint8_t offset = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
+        uint16_t address = (uint16_t)(0xff00 | offset);
+        if (opcode == 0xe0)
+            gb_memory_write(memory, address, cpu->a);
+        else
+            cpu->a = gb_memory_read(memory, address);
+        cpu->pc += 2;
+        *cycles = 12;
+        return GB_STEP_OK;
+    }
+    case 0xe2: /* LD (C),A */
+    case 0xf2:
+    { /* LD A,(C) */
+        uint16_t address = (uint16_t)(0xff00 | cpu->c);
+        if (opcode == 0xe2)
+            gb_memory_write(memory, address, cpu->a);
+        else
+            cpu->a = gb_memory_read(memory, address);
+        cpu->pc += 1;
+        *cycles = 8;
+        return GB_STEP_OK;
+    }
+    case 0xf9: /* LD SP,HL */
+        cpu->sp = (uint16_t)((cpu->h << 8) | cpu->l);
+        cpu->pc += 1;
+        *cycles = 8;
+        return GB_STEP_OK;
+
+    case 0xfa:
+    { /* LD A,(a16): read A from a 16-bit address */
+        uint8_t low = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
+        uint8_t high = gb_memory_read(memory, (uint16_t)(cpu->pc + 2));
+        uint16_t address = (uint16_t)(low | ((uint16_t)high << 8));
+        cpu->a = gb_memory_read(memory, address);
+        cpu->pc += 3;
+        *cycles = 16;
+        return GB_STEP_OK;
+    }
+    case 0x08:
+    { /* LD (a16),SP: store SP low byte, then high byte */
+        uint8_t low = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
+        uint8_t high = gb_memory_read(memory, (uint16_t)(cpu->pc + 2));
+        uint16_t address = (uint16_t)(low | ((uint16_t)high << 8));
+        gb_memory_write(memory, address, (uint8_t)cpu->sp);
+        gb_memory_write(memory, (uint16_t)(address + 1), (uint8_t)(cpu->sp >> 8));
+        cpu->pc += 3;
+        *cycles = 20;
+        return GB_STEP_OK;
+    }
+
     case 0xea:
     { /* LD (a16),A: write A to the next 16-bit address */
         uint8_t low = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));

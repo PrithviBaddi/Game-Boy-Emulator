@@ -287,5 +287,72 @@ int main(void)
         }
     }
 
+    /* LD A,(0xC123): read from an absolute address. */
+    rom[0x100] = 0xfa;
+    rom[0x101] = 0x23;
+    rom[0x102] = 0xc1;
+    gb_memory_write(&memory, 0xc123, 0x5a);
+    gb_cpu_init(&cpu);
+    cpu.f = 0x10;
+    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    assert(cpu.a == 0x5a);
+    assert(cpu.pc == 0x103);
+    assert(cpu.f == 0x10);
+    assert(cycles == 16);
+
+    /* LD (0xC200),SP: store the low byte before the high byte. */
+    rom[0x100] = 0x08;
+    rom[0x101] = 0x00;
+    rom[0x102] = 0xc2;
+    gb_cpu_init(&cpu);
+    cpu.sp = 0xbeef;
+    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    assert(gb_memory_read(&memory, 0xc200) == 0xef);
+    assert(gb_memory_read(&memory, 0xc201) == 0xbe);
+    assert(cpu.pc == 0x103);
+    assert(cycles == 20);
+
+    /* LDH (0x80),A and LDH A,(0x80) use address 0xFF80. */
+    rom[0x100] = 0xe0;
+    rom[0x101] = 0x80;
+    gb_cpu_init(&cpu);
+    cpu.a = 0x5a;
+    cpu.f = 0x10;
+    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    assert(gb_memory_read(&memory, 0xff80) == 0x5a);
+    assert(cpu.pc == 0x102 && cycles == 12 && cpu.f == 0x10);
+
+    rom[0x100] = 0xf0;
+    gb_cpu_init(&cpu);
+    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    assert(cpu.a == 0x5a);
+    assert(cpu.pc == 0x102 && cycles == 12);
+
+    /* LD (C),A and LD A,(C) use address 0xFF00 + C. */
+    rom[0x100] = 0xe2;
+    gb_cpu_init(&cpu);
+    cpu.c = 0x81;
+    cpu.a = 0x33;
+    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    assert(gb_memory_read(&memory, 0xff81) == 0x33);
+    assert(cpu.pc == 0x101 && cycles == 8);
+
+    rom[0x100] = 0xf2;
+    gb_cpu_init(&cpu);
+    cpu.c = 0x81;
+    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    assert(cpu.a == 0x33);
+    assert(cpu.pc == 0x101 && cycles == 8);
+
+    /* LD SP,HL */
+    rom[0x100] = 0xf9;
+    gb_cpu_init(&cpu);
+    cpu.h = 0xc1;
+    cpu.l = 0x23;
+    cpu.f = 0x10;
+    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    assert(cpu.sp == 0xc123);
+    assert(cpu.pc == 0x101 && cycles == 8 && cpu.f == 0x10);
+
     return 0;
 }
