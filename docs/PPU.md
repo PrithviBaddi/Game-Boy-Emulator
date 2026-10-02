@@ -61,18 +61,20 @@ LCDC bit 0 off makes the background color 0, so objects are drawn over it.
 ## OAM DMA
 
 A write to `FF46` stores the page and starts a 160-byte copy into
-`FE00`–`FE9F`. One byte is copied per machine cycle, beginning on the
-machine cycle after the write. The write is not an instantaneous copy.
-Writing `FF46` again restarts the transfer. While it runs, CPU reads below
-`FF80` return `FF` and those writes are ignored, except another write to
-`FF46`. `FF80`–`FFFE` stay usable, which is the HRAM execution path.
+`FE00`–`FE9F`. The machine cycle after the write does not copy a byte.
+Each following machine cycle copies one byte. The cycle that copies byte
+159 still leaves OAM locked for the CPU; the next machine cycle clears
+`dma_active`. Writing `FF46` again restarts the transfer.
 
-This is the block described in Pan Docs. It is stricter than the real DMA
-bus-conflict behavior. `call_timing` fetches a `CALL` from echo RAM at
-`$FDFE` during the transfer, so that read becomes `$FF` (`RST 38`) and the
-ROM loops instead of finishing. `oam_dma/sources-GS` also fails: a source
-page of `$FE` is copied as OAM data, without the external-bus decode that
-test is written to catch.
+OAM (`FE00`–`FE9F`) is the region the CPU cannot read or write while the
+transfer is active, and also in modes 2 and 3. ROM, VRAM (outside mode 3),
+external RAM, work RAM, echo RAM, and HRAM stay reachable. `call_timing`
+fetches its `CALL` from echo RAM at `$FDFE` and now passes. A DMA source at
+`$E000` or above is read as the address minus `$2000`, so `$FE00`–`$FFFF`
+come from work RAM `$DE00`–`$DFFF` rather than from OAM or I/O. That model
+is covered by a unit test. `oam_dma/sources-GS` still fails with signature
+`0x42`, so this source map is not treated as a match for that ROM. There is
+no same-cycle bus-conflict model beyond the OAM lock.
 
 ## What is still simplified
 

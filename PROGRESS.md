@@ -33,6 +33,22 @@
   `call_timing` still times out (echo RAM reads `$FF` during DMA, so the
   `CALL` at `$FDFE` becomes `RST 38`). `oam_dma/sources-GS` and the extracted
   PPU timing ROMs fail with signature `0x42`.
-- Still needed before an ordinary game is playable: joypad (including `STOP`
-  wake), cartridge banking beyond 32 KiB ROM-only, serial, audio, and tighter
-  PPU timing. No claim that a commercial game runs.
+- Stage 5 joypad, cartridge banking, and Catch are implemented. `ctest` has
+  16 passing targets: the previous 13 plus `joypad`, `mbc_saves`, and
+  `catch_game`. `cpu_demo` still ends at `RAM[0xC000] = 69` and 48 T-cycles.
+  UBSan reports the same 16/16 and a clean `cpu_demo`.
+- `python3 examples/make_play_game.py && ./build/pocketglass examples/catch.gb`
+  opens Catch. Arrows move, Enter starts and restarts, three coins win, and
+  catching the left-hand block loses. Keyboard state stays in the SDL app.
+- Supported header types: `00`, `08`, `09`, `01`, `02`, `03`, `0F`, `10`,
+  `11`, `12`, `13`. Other types are rejected. Battery saves are `game.sav`
+  next to the ROM, written on window close through a temporary file and
+  `rename`. A mismatched save is not overwritten. A crash loses progress
+  since the last successful write. MBC3 RTC is host wall-clock time.
+- Mooneye `call_timing` now passes (928732 T-cycles, 121092 steps).
+  `oam_dma/sources-GS` still fails at `0x42` (2417732 T-cycles, 346925
+  steps). The 12 PPU timing ROMs still fail at `0x42`. All 11 Blargg
+  individual ROMs and the previously passing timer, interrupt, and
+  `oam_dma/basic` plus `reg_read` ROMs still pass. No timeouts on this run.
+- Still later: serial, audio, MBC2/MBC5, and cycle-accurate PPU timing.
+  No claim that a commercial game runs.

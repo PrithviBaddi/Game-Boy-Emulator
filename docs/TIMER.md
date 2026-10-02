@@ -41,8 +41,9 @@ A write to TMA on the reload cycle is the value copied into TIMA. Writing DIV
 or TAC during the `00` cycle does not cancel the reload.
 
 `STOP` writes DIV (so the counter clears) and the CPU does not advance the
-timer again until something clears `cpu->stopped`. Joypad wake-up is still a
-later stage. `HALT` does not stop the divider.
+timer again until `gb_cpu_leave_stop` clears `cpu->stopped`. A new button
+press is what the desktop app uses to leave `STOP`. `HALT` does not stop
+the divider.
 
 If IF is already set when a step begins and IME is on, the interrupt is taken
 instead of the instruction. Service is 20 T-cycles. If the reload that sets IF

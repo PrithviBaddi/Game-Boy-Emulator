@@ -89,5 +89,6 @@ Every other base opcode, including the 11 illegal opcodes, returned
 
 Stage 3 took the timer handoff. `DIV`/`TIMA`/`TMA`/`TAC` and the timer
 interrupt are in `docs/TIMER.md`. Stage 4 took the picture processor and OAM
-DMA; see `docs/PPU.md`. Joypad release of `STOP`, audio, and cartridge
-banking are still later stages.
+DMA; see `docs/PPU.md`. Stage 5 took the joypad (including `STOP` wake),
+MBC1 and MBC3, battery saves, and the Catch ROM. Audio and serial are still
+later stages.

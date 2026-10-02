@@ -13,9 +13,11 @@ the CB prefix, has an implementation, and the 11 illegal opcodes lock the CPU
 instead of running as `NOP`. Stage 3 adds the DMG divider and programmable
 timer. A timer overflow can request interrupt `0x50`. Stage 4 adds the
 monochrome picture processor, a 160-byte OAM DMA transfer, and a window that
-shows frames produced by that processor. Audio, the joypad, and cartridge
-banking are later stages. `tinydbg` is an unrelated, abandoned debugger
-experiment and is not a dependency.
+shows frames produced by that processor. Stage 5 adds the DMG joypad,
+keyboard input, ROM-only and MBC1/MBC3 cartridges, battery-backed saves, and
+an original game you can finish. Audio and serial are later stages.
+`tinydbg` is an unrelated, abandoned debugger experiment and is not a
+dependency.
 
 ## Build and run
 
@@ -46,9 +48,9 @@ python3 examples/make_demo_rom.py
 
 The program prints `Cartridge: POCKETGLASS!` and `Header checksum: valid`, then
 runs the image. That file has no program at `0x0100`, so the CPU executes
-`NOP` and the LCD shows an empty frame. Close the window to exit. If a file
-is missing, truncated, not a valid 32 KiB ROM-only cartridge, or too large,
-the program reports that and does not open a game window.
+`NOP` and the LCD shows an empty frame. Close the window to exit. A missing
+file, a bad header checksum, a ROM size that does not match the header, or
+an unsupported cartridge type is reported and does not open a game window.
 
 ## First picture
 
@@ -65,6 +67,51 @@ The window should show a scrolling checkerboard and a sprite moving right.
 Close it to exit. An illegal or unsupported opcode is printed with its
 address, and the last frame stays up until the window closes.
 
+## Catch
+
+Catch is an original 32 KiB ROM-only game. The generator source is
+`examples/make_play_game.py`, and the built image is `examples/catch.gb`.
+One command regenerates it and opens the window:
+
+```sh
+python3 examples/make_play_game.py && ./build/pocketglass examples/catch.gb
+```
+
+The title says CATCH and START. Press Enter to play. Arrow keys move the
+player. On even waves a block falls at the left; catch it and you lose. On
+odd waves a coin falls in the center; catch three coins and you win. Enter
+on the win or lose screen returns to the title, and Enter again starts a
+new game. The gameplay runs on the emulated CPU, joypad, timer, and picture
+processor. Z is A, X is B, and Backspace or Right Shift is Select. Those
+keys are not used by Catch. Losing window focus releases every button. If
+the CPU executes `STOP`, the window waits and the next new press wakes it.
+
+## Cartridges and saves
+
+`gb_memory_load_cartridge` accepts the types whose header byte is `00`
+(ROM only), `08` and `09` (ROM plus external RAM, with or without a
+battery), `01` through `03` (MBC1, with or without RAM and a battery), and
+`0F`, `10`, `11`, `12`, and `13` (MBC3, including the timer variants).
+Anything else, including MBC5, is rejected. The file length must equal the
+header ROM size (32 KiB through 8 MiB). MBC1 bank 0 in the high window is
+bank 1, upper bits and the mode switch follow Pan Docs, and a bank number
+past the end of the file wraps by the number of 16 KiB banks. MBC3 bank 0
+is also bank 1. Its RAM and RTC registers are banked, and a `00` then `01`
+write on `6000`–`7FFF` latches the clock. External RAM reads as `FF` until
+the enable nibble is `0A`.
+
+A battery type writes a save beside the ROM: `game.gb` becomes `game.sav`
+(and `game.gbc` becomes `game.sav`; other names gain a `.sav` suffix). The
+file is loaded at startup. A missing save is a blank RAM. The length must
+be the external RAM size, or that size plus 18 bytes when the cartridge
+has an RTC. A mismatch is reported and the file is not overwritten on
+exit. A successful shutdown writes a temporary file, then renames it over
+the old save, so a failed write leaves the previous file in place. Closing
+the window is the only automatic write. A crash or a kill discards changes
+since the last successful save. The RTC, when present, is the host clock,
+not a count of T-cycles. The 18-byte trailer stores the latched registers,
+the live registers, and the host unix time.
+
 The cartridge header starts at byte address `0x100`; the title starts at
 `0x134`. `gb_cartridge.c` reads fields by their byte offsets, computes a header
 checksum, and checks that the file is large enough before accessing them.
@@ -76,10 +123,12 @@ the ROM are ignored. Addresses `0xE000` through `0xFDFF` mirror part of RAM.
 `gb_memory.c` is the single routing point for these accesses. `DIV`, `TIMA`,
 `TMA`, and `TAC` (`FF04`–`FF07`) are the timer in `gb_timer.c`. LCDC, STAT,
 scroll, `LY`, DMA, and the palettes are the picture processor in `gb_ppu.c`.
-The other I/O ports still store plain bytes. Only 32 KiB ROM-only cartridges
-are mapped now. The clock contract is in `docs/TIMER.md` and `docs/PPU.md`:
-`gb_cpu_step` still reports T-cycles, and the timer, LCD, and DMA advance one
-machine cycle (4 T-cycles) at a time.
+`FF00` is the joypad. The other I/O ports that are not the timer or the
+picture processor still store plain bytes. `gb_memory_init` is still the
+raw 32 KiB path used by unit tests and the ROM runner. Header-aware banking
+is `gb_memory_load_cartridge`. The clock contract is in `docs/TIMER.md` and
+`docs/PPU.md`: `gb_cpu_step` still reports T-cycles, and the timer, LCD, and
+DMA advance one machine cycle (4 T-cycles) at a time.
 
 ## First CPU experiment
 
@@ -129,20 +178,21 @@ The timer acceptance ROMs do too: `div_write`, `rapid_toggle`, `tim00`,
 `tim10_div_trigger`, `tim11`, `tim11_div_trigger`, `tima_reload`,
 `tima_write_reloading`, and `tma_write_reloading`.
 
-`halt_ime0_ei` now reports the pass signature (718384 T-cycles, 108444
-steps). `oam_dma/basic` and `oam_dma/reg_read` pass as well. `call_timing`
-still reaches the 300000000 T-cycle limit. It fetches a `CALL` from echo RAM
-at `$FDFE` while DMA is active; this core returns `$FF` for that read, the
-CPU executes `RST 38`, and the ROM stays there. `oam_dma/sources-GS` ends
-with the failure signature `0x42`: a DMA source page of `$FE` is copied from
-OAM itself, which is the case that test rejects. The extracted PPU timing
-ROMs also end at `0x42`: `hblank_ly_scx_timing-GS`, `intr_1_2_timing-GS`,
-`intr_2_0_timing`, `intr_2_mode0_timing`, `intr_2_mode0_timing_sprites`,
-`intr_2_mode3_timing`, `intr_2_oam_ok_timing`, `lcdon_timing-GS`,
-`lcdon_write_timing-GS`, `stat_irq_blocking`, `stat_lyc_onoff`, and
-`vblank_stat_intr-GS`. Mode 3 is a fixed 172 dots, so those cycle counts are
-not claimed as passes. The combined 64 KiB `cpu_instrs.gb` is not run: the
-memory bus maps 32 KiB only.
+`halt_ime0_ei` reports the pass signature (718384 T-cycles, 108444 steps).
+`oam_dma/basic`, `oam_dma/reg_read`, and `call_timing` pass as well.
+`call_timing` finished at 928732 T-cycles and 121092 steps. Echo RAM stays
+readable during DMA, so the `CALL` at `$FDFE` is fetched as an instruction,
+and OAM stays locked through the cycle that copies the last DMA byte.
+`oam_dma/sources-GS` still ends with the failure signature `0x42` (2417732
+T-cycles, 346925 steps). A DMA source of `$FE` is read through the WRAM
+mirror at `$DE00`, which is not the decode that test accepts. The extracted
+PPU timing ROMs also end at `0x42`: `hblank_ly_scx_timing-GS`,
+`intr_1_2_timing-GS`, `intr_2_0_timing`, `intr_2_mode0_timing`,
+`intr_2_mode0_timing_sprites`, `intr_2_mode3_timing`, `intr_2_oam_ok_timing`,
+`lcdon_timing-GS`, `lcdon_write_timing-GS`, `stat_irq_blocking`,
+`stat_lyc_onoff`, and `vblank_stat_intr-GS`. Mode 3 is a fixed 172 dots, so
+those cycle counts are not claimed as passes. The combined 64 KiB
+`cpu_instrs.gb` is not run: `cpu_rom_runner` still maps a raw 32 KiB image.
 
 ## First C lesson
 
