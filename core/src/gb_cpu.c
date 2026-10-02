@@ -9,7 +9,28 @@ enum
     FLAG_H = 0x20,
     FLAG_C = 0x10
 };
-
+static uint8_t *register_by_index(GbCpu *cpu, unsigned index)
+{
+    switch (index)
+    {
+    case 0:
+        return &cpu->b;
+    case 1:
+        return &cpu->c;
+    case 2:
+        return &cpu->d;
+    case 3:
+        return &cpu->e;
+    case 4:
+        return &cpu->h;
+    case 5:
+        return &cpu->l;
+    case 7:
+        return &cpu->a;
+    default:
+        return NULL; /* index 6 means memory at [HL] */
+    }
+}
 void gb_cpu_init(GbCpu *cpu)
 {
     memset(cpu, 0, sizeof *cpu);
@@ -25,6 +46,35 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
     if (cpu->halted)
         return GB_STEP_HALTED;
     uint8_t opcode = gb_memory_read(memory, cpu->pc);
+    if (opcode >= 0x40 && opcode <= 0x7f && opcode != 0x76)
+    {
+        unsigned destination = (opcode >> 3) & 7u;
+        unsigned source = opcode & 7u;
+        uint16_t hl = (uint16_t)(((uint16_t)cpu->h << 8) | cpu->l);
+
+        uint8_t value;
+        if (source == 6)
+        {
+            value = gb_memory_read(memory, hl);
+        }
+        else
+        {
+            value = *register_by_index(cpu, source);
+        }
+
+        if (destination == 6)
+        {
+            gb_memory_write(memory, hl, value);
+        }
+        else
+        {
+            *register_by_index(cpu, destination) = value;
+        }
+
+        cpu->pc += 1;
+        *cycles = (source == 6 || destination == 6) ? 8 : 4;
+        return GB_STEP_OK;
+    }
     switch (opcode)
     {
     case 0x00: /* NOP: do nothing */

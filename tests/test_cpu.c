@@ -86,5 +86,45 @@ int main(void)
     assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
     assert(cpu.pc == 0x102);
     assert(cycles == 12);
+    /* 0x78 = LD A,B */
+    rom[0x100] = 0x78;
+    gb_cpu_init(&cpu);
+    cpu.b = 0x42;
+    cpu.f = 0x10;
+    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    assert(cpu.a == 0x42);
+    assert(cpu.pc == 0x101);
+    assert(cpu.f == 0x10);
+    assert(cycles == 4);
+
+    /* 0x41 = LD B,C */
+    rom[0x100] = 0x41;
+    gb_cpu_init(&cpu);
+    cpu.c = 0x27;
+    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    assert(cpu.b == 0x27);
+
+    /* 0x46 = LD B,[HL]: read memory at address 0xC123 into B. */
+    rom[0x100] = 0x46;
+    gb_memory_write(&memory, 0xc123, 0x5a);
+    gb_cpu_init(&cpu);
+    cpu.h = 0xc1;
+    cpu.l = 0x23;
+    cpu.f = 0x10;
+    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    assert(cpu.b == 0x5a);
+    assert(cpu.pc == 0x101);
+    assert(cpu.f == 0x10);
+    assert(cycles == 8);
+
+    /* 0x70 = LD [HL],B: write B to memory at address 0xC123. */
+    rom[0x100] = 0x70;
+    gb_cpu_init(&cpu);
+    cpu.h = 0xc1;
+    cpu.l = 0x23;
+    cpu.b = 0x73;
+    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    assert(gb_memory_read(&memory, 0xc123) == 0x73);
+    assert(cycles == 8);
     return 0;
 }
