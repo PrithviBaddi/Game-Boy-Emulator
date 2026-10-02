@@ -189,5 +189,28 @@ int main(void)
         assert(cycles == (source == 6 ? 8u : 4u));
     }
 
+    /* LD r,d8: load 0xA5 into each register or [HL]. */
+    for (unsigned destination = 0; destination < 8; ++destination)
+    {
+        rom[0x100] = (uint8_t)(0x06 | (destination << 3));
+        rom[0x101] = 0xa5;
+
+        gb_cpu_init(&cpu);
+        cpu.h = 0xc1;
+        cpu.l = 0x23;
+        cpu.f = 0x10;
+        gb_memory_write(&memory, 0xc123, 0);
+
+        assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+
+        uint8_t result[] = {
+            cpu.b, cpu.c, cpu.d, cpu.e, cpu.h, cpu.l,
+            gb_memory_read(&memory, 0xc123), cpu.a};
+        assert(result[destination] == 0xa5);
+        assert(cpu.pc == 0x102);
+        assert(cpu.f == 0x10);
+        assert(cycles == (destination == 6 ? 12u : 8u));
+    }
+
     return 0;
 }

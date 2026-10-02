@@ -46,6 +46,26 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
     if (cpu->halted)
         return GB_STEP_HALTED;
     uint8_t opcode = gb_memory_read(memory, cpu->pc);
+    if ((opcode & 0xc7) == 0x06)
+    {
+        unsigned destination = (opcode >> 3) & 7u;
+        uint8_t value = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
+
+        if (destination == 6)
+        {
+            uint16_t hl = (uint16_t)(((uint16_t)cpu->h << 8) | cpu->l);
+            gb_memory_write(memory, hl, value);
+            *cycles = 12;
+        }
+        else
+        {
+            *register_by_index(cpu, destination) = value;
+            *cycles = 8;
+        }
+
+        cpu->pc += 2;
+        return GB_STEP_OK;
+    }
     if (opcode >= 0x40 && opcode <= 0x7f && opcode != 0x76)
     {
         unsigned destination = (opcode >> 3) & 7u;
@@ -105,21 +125,21 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         cpu->pc += 1;
         *cycles = 4;
         return GB_STEP_OK;
-    case 0x3e: /* LD A,d8: load the following byte into register A */
-        cpu->a = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
-        cpu->pc += 2;
-        *cycles = 8;
-        return GB_STEP_OK;
-    case 0x06: /* LD B,d8 */
-        cpu->b = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
-        cpu->pc += 2;
-        *cycles = 8;
-        return GB_STEP_OK;
-    case 0x0e: /* LD C,d8: put the next byte into register C */
-        cpu->c = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
-        cpu->pc += 2;
-        *cycles = 8;
-        return GB_STEP_OK;
+    // case 0x3e: /* LD A,d8: load the following byte into register A */
+    //     cpu->a = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
+    //     cpu->pc += 2;
+    //     *cycles = 8;
+    //     return GB_STEP_OK;
+    // case 0x06: /* LD B,d8 */
+    //     cpu->b = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
+    //     cpu->pc += 2;
+    //     *cycles = 8;
+    //     return GB_STEP_OK;
+    // case 0x0e: /* LD C,d8: put the next byte into register C */
+    //     cpu->c = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
+    //     cpu->pc += 2;
+    //     *cycles = 8;
+    //     return GB_STEP_OK;
     // case 0x80:
     // { /* ADD A,B: update result and Z/N/H/C flags */
     //     unsigned result = (unsigned)cpu->a + cpu->b;
