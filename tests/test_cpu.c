@@ -126,5 +126,41 @@ int main(void)
     assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
     assert(gb_memory_read(&memory, 0xc123) == 0x73);
     assert(cycles == 8);
+
+    /* Exercise every LD destination,source opcode except 0x76 (HALT). */
+    for (unsigned opcode = 0x40; opcode <= 0x7f; ++opcode)
+    {
+        if (opcode == 0x76)
+            continue;
+
+        rom[0x100] = (uint8_t)opcode;
+        gb_cpu_init(&cpu);
+        cpu.b = 0x11;
+        cpu.c = 0x22;
+        cpu.d = 0x33;
+        cpu.e = 0x44;
+        cpu.h = 0xc1;
+        cpu.l = 0x23;
+        cpu.a = 0x88;
+        cpu.f = 0x10;
+        gb_memory_write(&memory, 0xc123, 0x77);
+
+        uint8_t before[] = {
+            cpu.b, cpu.c, cpu.d, cpu.e, cpu.h, cpu.l,
+            gb_memory_read(&memory, 0xc123), cpu.a};
+
+        unsigned destination = (opcode >> 3) & 7u;
+        unsigned source = opcode & 7u;
+        assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+
+        uint8_t after[] = {
+            cpu.b, cpu.c, cpu.d, cpu.e, cpu.h, cpu.l,
+            gb_memory_read(&memory, 0xc123), cpu.a};
+        assert(after[destination] == before[source]);
+        assert(cpu.pc == 0x101);
+        assert(cpu.f == 0x10);
+        assert(cycles == ((source == 6 || destination == 6) ? 8u : 4u));
+    }
+
     return 0;
 }
