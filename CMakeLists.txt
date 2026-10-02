@@ -46,5 +46,11 @@ target_include_directories(cpu_alu_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
 target_compile_options(cpu_alu_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
 add_test(NAME cpu_alu COMMAND cpu_alu_tests)
 
+add_executable(cpu_control_tests tests/test_cpu_control.c tests/gb_test_util.c)
+target_link_libraries(cpu_control_tests PRIVATE gbcore)
+target_include_directories(cpu_control_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+target_compile_options(cpu_control_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+add_test(NAME cpu_control COMMAND cpu_control_tests)
+
 add_executable(cpu_demo examples/cpu_demo.c)
 target_link_libraries(cpu_demo PRIVATE gbcore)

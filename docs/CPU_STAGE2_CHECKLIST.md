@@ -66,6 +66,9 @@ Every other base opcode, including the 11 illegal opcodes, returned
   and immediates, 16-bit INC/DEC, `ADD HL,rr`, `ADD SP,e8`, `LD HL,SP+e8`,
   DAA, CPL, SCF, CCF, and the accumulator rotates. `cpu_alu` covers the flag
   boundaries. `RLCA`/`RLA`/`RRCA`/`RRA` clear Z even when A becomes 0.
-- [ ] **4. Control flow and stack.** Jumps, calls, returns, push, and pop.
+- [x] **4. Control flow and stack.** Conditional and absolute jumps, calls,
+  returns, `RETI` (sets `ime` immediately), `RST`, and `PUSH`/`POP` including
+  AF masking and SP wrap. `cpu_control` includes a countdown loop and nested
+  calls, and every test run has a step limit.
 - [ ] **5. CB prefix, CPU control, illegal opcodes, coverage report.**
 - [ ] **6. Independent ROMs and stage-2 exit notes.**

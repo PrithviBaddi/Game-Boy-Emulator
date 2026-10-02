@@ -199,6 +199,65 @@ static void add_sp_signed(GbCpu *cpu, int8_t offset, bool write_sp)
     cpu->f = flags; /* Z and N are always cleared */
 }
 
+static bool condition_met(const GbCpu *cpu, unsigned condition)
+{
+    bool zero = (cpu->f & FLAG_Z) != 0;
+    bool carry = (cpu->f & FLAG_C) != 0;
+    switch (condition)
+    {
+    case 0:
+        return !zero; /* NZ */
+    case 1:
+        return zero;
+    case 2:
+        return !carry; /* NC */
+    default:
+        return carry;
+    }
+}
+
+static void push16(GbCpu *cpu, GbMemory *memory, uint16_t value)
+{
+    cpu->sp = (uint16_t)(cpu->sp - 1);
+    gb_memory_write(memory, cpu->sp, (uint8_t)(value >> 8));
+    cpu->sp = (uint16_t)(cpu->sp - 1);
+    gb_memory_write(memory, cpu->sp, (uint8_t)value);
+}
+
+static uint16_t pop16(GbCpu *cpu, GbMemory *memory)
+{
+    uint8_t low = gb_memory_read(memory, cpu->sp);
+    cpu->sp = (uint16_t)(cpu->sp + 1);
+    uint8_t high = gb_memory_read(memory, cpu->sp);
+    cpu->sp = (uint16_t)(cpu->sp + 1);
+    return (uint16_t)(low | ((uint16_t)high << 8));
+}
+
+static uint16_t stack_pair(const GbCpu *cpu, unsigned pair)
+{
+    if (pair == 3)
+        return (uint16_t)((cpu->a << 8) | (cpu->f & 0xf0));
+    return pair_value(cpu, pair);
+}
+
+static void set_stack_pair(GbCpu *cpu, unsigned pair, uint16_t value)
+{
+    if (pair == 3)
+    {
+        cpu->a = (uint8_t)(value >> 8);
+        cpu->f = (uint8_t)(value & 0xf0); /* POP AF clears the unused flag bits */
+        return;
+    }
+    set_pair(cpu, pair, value);
+}
+
+static uint16_t read_imm16(const GbMemory *memory, uint16_t address)
+{
+    uint8_t low = gb_memory_read(memory, address);
+    uint8_t high = gb_memory_read(memory, (uint16_t)(address + 1));
+    return (uint16_t)(low | ((uint16_t)high << 8));
+}
+
 void gb_cpu_init(GbCpu *cpu)
 {
     memset(cpu, 0, sizeof *cpu);
@@ -418,6 +477,95 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         return GB_STEP_OK;
     }
 
+    if ((opcode & 0xe7) == 0x20)
+    {
+        int8_t offset = (int8_t)gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
+        if (condition_met(cpu, (opcode >> 3) & 3u))
+        {
+            cpu->pc = (uint16_t)(cpu->pc + 2 + offset);
+            *cycles = 12;
+        }
+        else
+        {
+            cpu->pc = (uint16_t)(cpu->pc + 2);
+            *cycles = 8;
+        }
+        return GB_STEP_OK;
+    }
+
+    if ((opcode & 0xe7) == 0xc0)
+    {
+        if (condition_met(cpu, (opcode >> 3) & 3u))
+        {
+            cpu->pc = pop16(cpu, memory);
+            *cycles = 20;
+        }
+        else
+        {
+            cpu->pc = (uint16_t)(cpu->pc + 1);
+            *cycles = 8;
+        }
+        return GB_STEP_OK;
+    }
+
+    if ((opcode & 0xe7) == 0xc2)
+    {
+        uint16_t target = read_imm16(memory, (uint16_t)(cpu->pc + 1));
+        if (condition_met(cpu, (opcode >> 3) & 3u))
+        {
+            cpu->pc = target;
+            *cycles = 16;
+        }
+        else
+        {
+            cpu->pc = (uint16_t)(cpu->pc + 3);
+            *cycles = 12;
+        }
+        return GB_STEP_OK;
+    }
+
+    if ((opcode & 0xe7) == 0xc4)
+    {
+        uint16_t target = read_imm16(memory, (uint16_t)(cpu->pc + 1));
+        if (condition_met(cpu, (opcode >> 3) & 3u))
+        {
+            push16(cpu, memory, (uint16_t)(cpu->pc + 3));
+            cpu->pc = target;
+            *cycles = 24;
+        }
+        else
+        {
+            cpu->pc = (uint16_t)(cpu->pc + 3);
+            *cycles = 12;
+        }
+        return GB_STEP_OK;
+    }
+
+    if ((opcode & 0xcf) == 0xc1 || (opcode & 0xcf) == 0xc5)
+    {
+        unsigned pair = (opcode >> 4) & 3u;
+        if (opcode & 0x04)
+        {
+            push16(cpu, memory, stack_pair(cpu, pair));
+            *cycles = 16;
+        }
+        else
+        {
+            set_stack_pair(cpu, pair, pop16(cpu, memory));
+            *cycles = 12;
+        }
+        cpu->pc = (uint16_t)(cpu->pc + 1);
+        return GB_STEP_OK;
+    }
+
+    if ((opcode & 0xc7) == 0xc7)
+    {
+        push16(cpu, memory, (uint16_t)(cpu->pc + 1));
+        cpu->pc = (uint16_t)(opcode & 0x38);
+        *cycles = 16;
+        return GB_STEP_OK;
+    }
+
     switch (opcode)
     {
     case 0x00: /* NOP: do nothing */
@@ -542,6 +690,28 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         *cycles = 12;
         return GB_STEP_OK;
     }
+    case 0xc3: /* JP a16 */
+        cpu->pc = read_imm16(memory, (uint16_t)(cpu->pc + 1));
+        *cycles = 16;
+        return GB_STEP_OK;
+    case 0xc9: /* RET */
+        cpu->pc = pop16(cpu, memory);
+        *cycles = 16;
+        return GB_STEP_OK;
+    case 0xcd: /* CALL a16 */
+        push16(cpu, memory, (uint16_t)(cpu->pc + 3));
+        cpu->pc = read_imm16(memory, (uint16_t)(cpu->pc + 1));
+        *cycles = 24;
+        return GB_STEP_OK;
+    case 0xd9: /* RETI */
+        cpu->pc = pop16(cpu, memory);
+        cpu->ime = true;
+        *cycles = 16;
+        return GB_STEP_OK;
+    case 0xe9: /* JP HL */
+        cpu->pc = pair_value(cpu, 2);
+        *cycles = 4;
+        return GB_STEP_OK;
     case 0x76: /* HALT: wait until future interrupt handling wakes CPU */
         cpu->pc += 1;
         cpu->halted = true;

@@ -13,6 +13,7 @@ typedef struct {
     uint8_t a, f, b, c, d, e, h, l;
     uint16_t sp, pc;
     bool halted;
+    bool ime; /* master interrupt enable; RETI turns it on with no delay */
 } GbCpu;
 
 typedef enum {
