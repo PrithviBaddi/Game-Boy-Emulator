@@ -8,8 +8,10 @@ homebrew ROMs, rewind gameplay, and show a live view inside the machine.
 
 Milestone 0 is complete on an Apple M2 Mac. Milestone 1 reads a cartridge
 header and maps a 32 KiB ROM-only cartridge into a Game Boy memory bus.
-Milestone 2 has begun with six CPU opcodes and a tiny instruction demo.
-It cannot run a real game yet.
+Stage 2 of the CPU is complete: every documented legal SM83 opcode, including
+the CB prefix, has an implementation, and the 11 illegal opcodes lock the CPU
+instead of running as `NOP`. The desktop window still does not play a game.
+Timers, the picture processor, audio, and cartridge banking are later stages.
 `tinydbg` is
 an unrelated, abandoned debugger experiment and is not a dependency.
 
@@ -64,22 +66,48 @@ registers their real behavior. Only 32 KiB ROM-only cartridges are mapped now.
 ./build/cpu_demo
 ```
 
-This demo puts nine instruction bytes into a synthetic cartridge at address
-`0x0100`. The CPU loads 64 into register A, loads 5 into B, adds them, writes
-69 to work RAM at `0xC000`, then halts. Every printed row is one instruction.
-`PC` is the **program counter**, the address of the next instruction. `opcode`
-is the instruction byte. `cycles` tells how much hardware time it consumes.
+This demo puts a short program into a synthetic cartridge at address `0x0100`.
+The CPU loads 64 into register A, loads 5 into B, loads 7 into C, adds A and B,
+writes 69 to work RAM at `0xC000`, then halts. Every printed row is one
+instruction. `PC` is the **program counter**, the address of the next
+instruction. `opcode` is the instruction byte. `cycles` is the instruction's
+time in **T-cycles** (a `NOP` is 4).
 
-The expected last line is `RAM[0xC000] = 69 (expected 69); total cycles = 40`.
+The expected last line is `RAM[0xC000] = 69 (expected 69); total cycles = 48`.
 Open `examples/cpu_demo.c` and find the `program[]` array; then look for each
 opcode in `core/src/gb_cpu.c`. The CPU's `gb_memory_read` and
 `gb_memory_write` calls are exactly why we built the memory bus first.
 
-Only `NOP`, `LD A,d8`, `LD B,d8`, `ADD A,B`, `LD (a16),A`, and `HALT` are
-implemented so far. Initial registers are a diagnostic state, not the final
-Game Boy post-boot values. Unsupported opcodes stop rather than silently
-pretending they worked. Next we will implement the remaining instructions in
-small families and validate them against independent test ROMs.
+`gb_cpu_init` is a diagnostic state: every register is 0, `PC` is `0x0100`,
+and `SP` is `0xFFFE`. That is not the state left by Nintendo's boot ROM, which
+this project does not include. `gb_cpu_init_dmg_post_boot` copies only the
+documented DMG register values from after that ROM. `gb_cpu_step` returns
+`GB_STEP_UNSUPPORTED` only if a legal opcode has no implementation. The 11
+illegal opcodes (`D3`, `DB`, `DD`, `E3`, `E4`, `EB`, `EC`, `ED`, `F4`, `FC`,
+`FD`) return `GB_STEP_ILLEGAL` and hard-lock the CPU. Coverage and the phase
+notes are in `docs/CPU_OPCODE_COVERAGE.md` and `docs/CPU_STAGE2_CHECKLIST.md`.
+
+Independent ROM checks are optional and are not part of `ctest`, because the
+images are downloaded rather than stored in git:
+
+```sh
+tests/external/fetch_cpu_roms.sh
+cmake --build build --target cpu_rom_runner
+tests/external/run_cpu_roms.sh
+```
+
+Blargg's individual `cpu_instrs` ROMs come from the retrio mirror at commit
+`c240dd7` (Shay Green's test ROMs; `cpu_instrs/readme.txt` has no separate
+SPDX license, so the binaries are not committed). Mooneye's published build
+`mts-20260714-0944-31510e1` is MIT licensed. On the current core, 10 of the 11
+individual Blargg ROMs print `Passed`. `02-interrupts` stops with
+`Timer doesn't work`. Mooneye `instr/daa`, `ei_sequence`, `ei_timing`,
+`rapid_di_ei`, `if_ie_registers`, and `boot_regs-dmgABC` report the pass
+signature. `div_timing` and `pop_timing` report the failure signature.
+`halt_ime0_ei` and `call_timing` reach the cycle limit without a signature.
+Those depend on the timer, the picture hardware, or interrupt timing finer
+than one instruction. The combined 64 KiB `cpu_instrs.gb` is not run: the
+memory bus maps 32 KiB only.
 
 ## First C lesson
 

@@ -1,3 +1,5 @@
 build/
+build-asan/
 .DS_Store
 examples/header-demo.gb
+tests/external/roms/

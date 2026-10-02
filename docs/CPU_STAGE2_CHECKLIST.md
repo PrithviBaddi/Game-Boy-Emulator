@@ -77,4 +77,12 @@ Every other base opcode, including the 11 illegal opcodes, returned
   11 illegal, 256 CB. `gb_cpu_request_interrupt` is the hook stage 3 devices
   will call. Joypad wake from `STOP`, and anything that needs a running timer
   or PPU, is still stage 3.
-- [ ] **6. Independent ROMs and stage-2 exit notes.**
+- [x] **6. Independent ROMs and stage-2 exit notes.** `cpu_rom_runner` reads
+  Blargg serial text (`SB` then `SC=0x81`) and the Mooneye Fibonacci / `0x42`
+  signature after `LD B,B`. Results are in the README. The handoff to stage 3
+  is the timer (`DIV`/`TIMA`/`TAC`), real interrupt sources that call
+  `gb_cpu_request_interrupt`, joypad release of `STOP`, the PPU, and MBC.
+  Interrupt dispatch itself is already per instruction, not per machine cycle.
+  UndefinedBehaviorSanitizer builds of the unit tests and `cpu_demo` passed.
+  AddressSanitizer's runtime aborts during its own startup on this AppleClang
+  and macOS combination, before the test body runs.

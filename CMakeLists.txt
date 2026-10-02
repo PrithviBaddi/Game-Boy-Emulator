@@ -72,3 +72,8 @@ add_test(NAME cpu_coverage COMMAND cpu_coverage_tests)
 
 add_executable(cpu_demo examples/cpu_demo.c)
 target_link_libraries(cpu_demo PRIVATE gbcore)
+
+add_executable(cpu_rom_runner tests/cpu_rom_runner.c)
+target_link_libraries(cpu_rom_runner PRIVATE gbcore)
+target_include_directories(cpu_rom_runner PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+target_compile_options(cpu_rom_runner PRIVATE -Wall -Wextra -Wpedantic)
