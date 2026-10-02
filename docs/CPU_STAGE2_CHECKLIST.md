@@ -57,8 +57,15 @@ Every other base opcode, including the 11 illegal opcodes, returned
   stay active if a build defines `NDEBUG`), `tests/gb_test_util.c` for bounded
   headless programs, and this checklist. `cpu_harness` also records the
   diagnostic initial registers.
-- [ ] **2. Data movement.** Boundary coverage for loads already implemented.
-- [ ] **3. Arithmetic and logic.** 8-bit and 16-bit ALU, DAA, and flag ops.
+- [x] **2. Data movement.** No new load opcodes were required. `cpu_loads`
+  checks little-endian immediates, 16-bit address wrap, HL+ / HL- wrap, echo
+  RAM, high-page edges, unchanged flags (`0xF0`), and a sweep of every
+  ordinary load opcode. `LD HL,SP+e8` is still with the arithmetic phase.
+- [x] **3. Arithmetic and logic.** 8-bit INC/DEC (including the previously
+  uncommitted grouped form), ADC/SUB/SBC/AND/XOR/OR/CP for registers, `(HL)`,
+  and immediates, 16-bit INC/DEC, `ADD HL,rr`, `ADD SP,e8`, `LD HL,SP+e8`,
+  DAA, CPL, SCF, CCF, and the accumulator rotates. `cpu_alu` covers the flag
+  boundaries. `RLCA`/`RLA`/`RRCA`/`RRA` clear Z even when A becomes 0.
 - [ ] **4. Control flow and stack.** Jumps, calls, returns, push, and pop.
 - [ ] **5. CB prefix, CPU control, illegal opcodes, coverage report.**
 - [ ] **6. Independent ROMs and stage-2 exit notes.**

@@ -34,5 +34,17 @@ target_include_directories(cpu_harness_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
 target_compile_options(cpu_harness_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
 add_test(NAME cpu_harness COMMAND cpu_harness_tests)
 
+add_executable(cpu_load_tests tests/test_cpu_loads.c tests/gb_test_util.c)
+target_link_libraries(cpu_load_tests PRIVATE gbcore)
+target_include_directories(cpu_load_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+target_compile_options(cpu_load_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+add_test(NAME cpu_loads COMMAND cpu_load_tests)
+
+add_executable(cpu_alu_tests tests/test_cpu_alu.c tests/gb_test_util.c)
+target_link_libraries(cpu_alu_tests PRIVATE gbcore)
+target_include_directories(cpu_alu_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+target_compile_options(cpu_alu_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+add_test(NAME cpu_alu COMMAND cpu_alu_tests)
+
 add_executable(cpu_demo examples/cpu_demo.c)
 target_link_libraries(cpu_demo PRIVATE gbcore)
