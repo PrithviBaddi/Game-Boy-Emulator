@@ -1,4 +1,4 @@
-#include <assert.h>
+#include "gb_check.h"
 #include <stdint.h>
 #include "gb_cpu.h"
 
@@ -13,18 +13,18 @@ int main(void)
     GbMemory memory;
     GbCpu cpu;
     unsigned cycles;
-    assert(gb_memory_init(&memory, rom, sizeof rom));
+    GB_REQUIRE(gb_memory_init(&memory, rom, sizeof rom));
     gb_cpu_init(&cpu);
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(cpu.a == 0x40 && cpu.pc == 0x102 && cycles == 8);
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(cpu.b == 5 && cpu.pc == 0x104);
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(cpu.a == 0x45 && cpu.f == 0 && cycles == 4);
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(gb_memory_read(&memory, 0xc000) == 0x45 && cycles == 16);
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_HALTED);
-    assert(cpu.halted && cpu.pc == 0x109);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(cpu.a == 0x40 && cpu.pc == 0x102 && cycles == 8);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(cpu.b == 5 && cpu.pc == 0x104);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(cpu.a == 0x45 && cpu.f == 0 && cycles == 4);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(gb_memory_read(&memory, 0xc000) == 0x45 && cycles == 16);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_HALTED);
+    GB_REQUIRE(cpu.halted && cpu.pc == 0x109);
 
     /* Addition wraps to zero and sets zero, half-carry, and carry. */
     uint8_t sum[] = {0x3e, 0xff, 0x06, 0x01, 0x80};
@@ -32,77 +32,77 @@ int main(void)
         rom[0x100 + i] = sum[i];
     gb_cpu_init(&cpu);
     for (unsigned i = 0; i < 3; ++i)
-        assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(cpu.a == 0 && cpu.f == 0xb0);
+        GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(cpu.a == 0 && cpu.f == 0xb0);
 
     rom[0x100] = 0xd3; /* unsupported opcode */
     gb_cpu_init(&cpu);
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_UNSUPPORTED);
-    assert(cpu.pc == 0x100 && cycles == 0);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_UNSUPPORTED);
+    GB_REQUIRE(cpu.pc == 0x100 && cycles == 0);
     /* LD C,d8 loads C without changing the flags. */
     rom[0x100] = 0x0e;
     rom[0x101] = 0x07;
     gb_cpu_init(&cpu);
     cpu.f = 0x10;
 
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(cpu.c == 7);
-    assert(cpu.pc == 0x102);
-    assert(cycles == 8);
-    assert(cpu.f == 0x10);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(cpu.c == 7);
+    GB_REQUIRE(cpu.pc == 0x102);
+    GB_REQUIRE(cycles == 8);
+    GB_REQUIRE(cpu.f == 0x10);
     /* INC A: crossing 0x0f sets H and preserves C. */
     rom[0x100] = 0x3c;
     gb_cpu_init(&cpu);
     cpu.a = 0x0f;
     cpu.f = 0x10;
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(cpu.a == 0x10);
-    assert(cpu.f == 0x30);
-    assert(cpu.pc == 0x101);
-    assert(cycles == 4);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(cpu.a == 0x10);
+    GB_REQUIRE(cpu.f == 0x30);
+    GB_REQUIRE(cpu.pc == 0x101);
+    GB_REQUIRE(cycles == 4);
 
     /* INC A: 0xff wraps to zero, setting Z and H. */
     gb_cpu_init(&cpu);
     cpu.a = 0xff;
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(cpu.a == 0);
-    assert(cpu.f == 0xa0);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(cpu.a == 0);
+    GB_REQUIRE(cpu.f == 0xa0);
     /* JR +2: start at 0x0100, skip the two-byte instruction,
    then move two bytes forward to 0x0104. */
     rom[0x100] = 0x18;
     rom[0x101] = 0x02;
     gb_cpu_init(&cpu);
     cpu.f = 0x10;
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(cpu.pc == 0x104);
-    assert(cycles == 12);
-    assert(cpu.f == 0x10); /* JR does not change flags */
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(cpu.pc == 0x104);
+    GB_REQUIRE(cycles == 12);
+    GB_REQUIRE(cpu.f == 0x10); /* JR does not change flags */
 
     /* JR -4: start at 0x0104 and land at 0x0102. */
     rom[0x104] = 0x18;
     rom[0x105] = 0xfc; /* 0xfc represents -4 as a signed byte */
     gb_cpu_init(&cpu);
     cpu.pc = 0x104;
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(cpu.pc == 0x102);
-    assert(cycles == 12);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(cpu.pc == 0x102);
+    GB_REQUIRE(cycles == 12);
     /* 0x78 = LD A,B */
     rom[0x100] = 0x78;
     gb_cpu_init(&cpu);
     cpu.b = 0x42;
     cpu.f = 0x10;
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(cpu.a == 0x42);
-    assert(cpu.pc == 0x101);
-    assert(cpu.f == 0x10);
-    assert(cycles == 4);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(cpu.a == 0x42);
+    GB_REQUIRE(cpu.pc == 0x101);
+    GB_REQUIRE(cpu.f == 0x10);
+    GB_REQUIRE(cycles == 4);
 
     /* 0x41 = LD B,C */
     rom[0x100] = 0x41;
     gb_cpu_init(&cpu);
     cpu.c = 0x27;
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(cpu.b == 0x27);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(cpu.b == 0x27);
 
     /* 0x46 = LD B,[HL]: read memory at address 0xC123 into B. */
     rom[0x100] = 0x46;
@@ -111,11 +111,11 @@ int main(void)
     cpu.h = 0xc1;
     cpu.l = 0x23;
     cpu.f = 0x10;
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(cpu.b == 0x5a);
-    assert(cpu.pc == 0x101);
-    assert(cpu.f == 0x10);
-    assert(cycles == 8);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(cpu.b == 0x5a);
+    GB_REQUIRE(cpu.pc == 0x101);
+    GB_REQUIRE(cpu.f == 0x10);
+    GB_REQUIRE(cycles == 8);
 
     /* 0x70 = LD [HL],B: write B to memory at address 0xC123. */
     rom[0x100] = 0x70;
@@ -123,9 +123,9 @@ int main(void)
     cpu.h = 0xc1;
     cpu.l = 0x23;
     cpu.b = 0x73;
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(gb_memory_read(&memory, 0xc123) == 0x73);
-    assert(cycles == 8);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(gb_memory_read(&memory, 0xc123) == 0x73);
+    GB_REQUIRE(cycles == 8);
 
     /* Exercise every LD destination,source opcode except 0x76 (HALT). */
     for (unsigned opcode = 0x40; opcode <= 0x7f; ++opcode)
@@ -151,15 +151,15 @@ int main(void)
 
         unsigned destination = (opcode >> 3) & 7u;
         unsigned source = opcode & 7u;
-        assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+        GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
 
         uint8_t after[] = {
             cpu.b, cpu.c, cpu.d, cpu.e, cpu.h, cpu.l,
             gb_memory_read(&memory, 0xc123), cpu.a};
-        assert(after[destination] == before[source]);
-        assert(cpu.pc == 0x101);
-        assert(cpu.f == 0x10);
-        assert(cycles == ((source == 6 || destination == 6) ? 8u : 4u));
+        GB_REQUIRE(after[destination] == before[source]);
+        GB_REQUIRE(cpu.pc == 0x101);
+        GB_REQUIRE(cpu.f == 0x10);
+        GB_REQUIRE(cycles == ((source == 6 || destination == 6) ? 8u : 4u));
     }
 
     /* ADD A,r for B, C, D, E, H, L, [HL], and A. */
@@ -182,11 +182,11 @@ int main(void)
         cpu.f = 0xf0; /* confirm ADD replaces old flags */
         gb_memory_write(&memory, 0xc123, 0x0f);
 
-        assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-        assert(cpu.a == expected_a[source]);
-        assert(cpu.f == expected_f[source]);
-        assert(cpu.pc == 0x101);
-        assert(cycles == (source == 6 ? 8u : 4u));
+        GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+        GB_REQUIRE(cpu.a == expected_a[source]);
+        GB_REQUIRE(cpu.f == expected_f[source]);
+        GB_REQUIRE(cpu.pc == 0x101);
+        GB_REQUIRE(cycles == (source == 6 ? 8u : 4u));
     }
 
     /* LD r,d8: load 0xA5 into each register or [HL]. */
@@ -201,15 +201,15 @@ int main(void)
         cpu.f = 0x10;
         gb_memory_write(&memory, 0xc123, 0);
 
-        assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+        GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
 
         uint8_t result[] = {
             cpu.b, cpu.c, cpu.d, cpu.e, cpu.h, cpu.l,
             gb_memory_read(&memory, 0xc123), cpu.a};
-        assert(result[destination] == 0xa5);
-        assert(cpu.pc == 0x102);
-        assert(cpu.f == 0x10);
-        assert(cycles == (destination == 6 ? 12u : 8u));
+        GB_REQUIRE(result[destination] == 0xa5);
+        GB_REQUIRE(cpu.pc == 0x102);
+        GB_REQUIRE(cpu.f == 0x10);
+        GB_REQUIRE(cycles == (destination == 6 ? 12u : 8u));
     }
 
     /* LD BC/DE/HL/SP,0xC123 */
@@ -221,7 +221,7 @@ int main(void)
 
         gb_cpu_init(&cpu);
         cpu.f = 0x10;
-        assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+        GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
 
         uint16_t actual = 0;
         switch (pair)
@@ -240,10 +240,10 @@ int main(void)
             break;
         }
 
-        assert(actual == 0xc123);
-        assert(cpu.pc == 0x103);
-        assert(cpu.f == 0x10);
-        assert(cycles == 12);
+        GB_REQUIRE(actual == 0xc123);
+        GB_REQUIRE(cpu.pc == 0x103);
+        GB_REQUIRE(cpu.f == 0x10);
+        GB_REQUIRE(cycles == 12);
     }
 
     /* Transfer A through BC, DE, HL+, and HL-. */
@@ -266,24 +266,24 @@ int main(void)
             uint16_t address = addresses[pair];
             gb_memory_write(&memory, address, (uint8_t)(0x40 + pair));
 
-            assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+            GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
             if (load)
             {
-                assert(cpu.a == (uint8_t)(0x40 + pair));
+                GB_REQUIRE(cpu.a == (uint8_t)(0x40 + pair));
             }
             else
             {
-                assert(gb_memory_read(&memory, address) == 0x99);
+                GB_REQUIRE(gb_memory_read(&memory, address) == 0x99);
             }
 
             uint16_t hl = (uint16_t)((cpu.h << 8) | cpu.l);
             if (pair == 2)
-                assert(hl == 0xc346); /* HL+ */
+                GB_REQUIRE(hl == 0xc346); /* HL+ */
             if (pair == 3)
-                assert(hl == 0xc344); /* HL- */
-            assert(cpu.pc == 0x101);
-            assert(cpu.f == 0x10);
-            assert(cycles == 8);
+                GB_REQUIRE(hl == 0xc344); /* HL- */
+            GB_REQUIRE(cpu.pc == 0x101);
+            GB_REQUIRE(cpu.f == 0x10);
+            GB_REQUIRE(cycles == 8);
         }
     }
 
@@ -294,11 +294,11 @@ int main(void)
     gb_memory_write(&memory, 0xc123, 0x5a);
     gb_cpu_init(&cpu);
     cpu.f = 0x10;
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(cpu.a == 0x5a);
-    assert(cpu.pc == 0x103);
-    assert(cpu.f == 0x10);
-    assert(cycles == 16);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(cpu.a == 0x5a);
+    GB_REQUIRE(cpu.pc == 0x103);
+    GB_REQUIRE(cpu.f == 0x10);
+    GB_REQUIRE(cycles == 16);
 
     /* LD (0xC200),SP: store the low byte before the high byte. */
     rom[0x100] = 0x08;
@@ -306,11 +306,11 @@ int main(void)
     rom[0x102] = 0xc2;
     gb_cpu_init(&cpu);
     cpu.sp = 0xbeef;
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(gb_memory_read(&memory, 0xc200) == 0xef);
-    assert(gb_memory_read(&memory, 0xc201) == 0xbe);
-    assert(cpu.pc == 0x103);
-    assert(cycles == 20);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(gb_memory_read(&memory, 0xc200) == 0xef);
+    GB_REQUIRE(gb_memory_read(&memory, 0xc201) == 0xbe);
+    GB_REQUIRE(cpu.pc == 0x103);
+    GB_REQUIRE(cycles == 20);
 
     /* LDH (0x80),A and LDH A,(0x80) use address 0xFF80. */
     rom[0x100] = 0xe0;
@@ -318,31 +318,31 @@ int main(void)
     gb_cpu_init(&cpu);
     cpu.a = 0x5a;
     cpu.f = 0x10;
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(gb_memory_read(&memory, 0xff80) == 0x5a);
-    assert(cpu.pc == 0x102 && cycles == 12 && cpu.f == 0x10);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(gb_memory_read(&memory, 0xff80) == 0x5a);
+    GB_REQUIRE(cpu.pc == 0x102 && cycles == 12 && cpu.f == 0x10);
 
     rom[0x100] = 0xf0;
     gb_cpu_init(&cpu);
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(cpu.a == 0x5a);
-    assert(cpu.pc == 0x102 && cycles == 12);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(cpu.a == 0x5a);
+    GB_REQUIRE(cpu.pc == 0x102 && cycles == 12);
 
     /* LD (C),A and LD A,(C) use address 0xFF00 + C. */
     rom[0x100] = 0xe2;
     gb_cpu_init(&cpu);
     cpu.c = 0x81;
     cpu.a = 0x33;
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(gb_memory_read(&memory, 0xff81) == 0x33);
-    assert(cpu.pc == 0x101 && cycles == 8);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(gb_memory_read(&memory, 0xff81) == 0x33);
+    GB_REQUIRE(cpu.pc == 0x101 && cycles == 8);
 
     rom[0x100] = 0xf2;
     gb_cpu_init(&cpu);
     cpu.c = 0x81;
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(cpu.a == 0x33);
-    assert(cpu.pc == 0x101 && cycles == 8);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(cpu.a == 0x33);
+    GB_REQUIRE(cpu.pc == 0x101 && cycles == 8);
 
     /* LD SP,HL */
     rom[0x100] = 0xf9;
@@ -350,9 +350,9 @@ int main(void)
     cpu.h = 0xc1;
     cpu.l = 0x23;
     cpu.f = 0x10;
-    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
-    assert(cpu.sp == 0xc123);
-    assert(cpu.pc == 0x101 && cycles == 8 && cpu.f == 0x10);
+    GB_REQUIRE(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    GB_REQUIRE(cpu.sp == 0xc123);
+    GB_REQUIRE(cpu.pc == 0x101 && cycles == 8 && cpu.f == 0x10);
 
     return 0;
 }

@@ -1,0 +1,64 @@
+# Stage 2 checklist — DMG SM83 CPU
+
+Cycles reported by `gb_cpu_step` are **T-cycles** (NOP = 4). That matches the
+existing unit tests (`LD A,d8` = 8, `ADD A,r` = 4, `LD (a16),A` = 16) and the
+usual 4 T-cycles per machine cycle. Opcode meaning, length, flags, and timing
+follow [Pan Docs](https://gbdev.io/pandocs/), the
+[SM83 opcode tables](https://gbdev.io/gb-opcodes/optables/), and the
+[RGBDS gbz80(7) reference](https://rgbds.gbdev.io/docs/master/gbz80.7).
+
+## Starting point (commit `fa22315`, plus uncommitted `core/src/gb_cpu.c`)
+
+Diagnostic `gb_cpu_init` state, not the post-boot state. The repository does
+not contain Nintendo boot firmware.
+
+| Field | Diagnostic init | Documented DMG state after the boot ROM |
+| --- | --- | --- |
+| A, F | 0, 0 | 0x01, 0xB0 |
+| BC | 0x0000 | 0x0013 |
+| DE | 0x0000 | 0x00D8 |
+| HL | 0x0000 | 0x014D |
+| SP | 0xFFFE | 0xFFFE |
+| PC | 0x0100 | 0x0100 |
+
+Working tree before phase 1: grouped 8-bit INC/DEC is already in
+`gb_cpu_step`, and the old single `case 0x3c` is commented out. That edit is
+kept and is committed with the arithmetic phase, not this audit.
+
+### Base opcodes at the start
+
+Legal base opcodes: 245. Documented illegal opcodes, which hard-lock the CPU:
+`D3 DB DD E3 E4 EB EC ED F4 FC FD` (11). All 256 CB-prefixed operations are
+legal and were unimplemented.
+
+Implemented and covered by `tests/test_cpu.c` (118 base opcodes):
+
+- `NOP`, `JR e8`, `HALT`
+- `LD r,r'` for `0x40–0x7F` except `HALT`
+- `LD r,d8` including `LD (HL),d8`
+- `LD rr,d16` for BC, DE, HL, SP
+- `LD (BC/DE/HL+/HL-),A` and `LD A,(BC/DE/HL+/HL-)`
+- `LD (a16),A`, `LD A,(a16)`, `LD (a16),SP`, `LD SP,HL`
+- `LDH (a8),A`, `LDH A,(a8)`, `LD (C),A`, `LD A,(C)`
+- `ADD A,r` including `ADD A,(HL)`
+- 8-bit `INC`/`DEC` for registers and `(HL)` (uncommitted at the start)
+
+Not yet data-movement gaps in the ordinary load set. `LD HL,SP+e8` follows
+the arithmetic flag rules and is scheduled with that phase. `PUSH`/`POP` are
+scheduled with the stack phase.
+
+Every other base opcode, including the 11 illegal opcodes, returned
+`GB_STEP_UNSUPPORTED` and left PC unchanged. None of them fell through as
+`NOP`. No CB prefix was decoded.
+
+## Phases
+
+- [x] **1. Audit and test infrastructure.** Always-on `GB_REQUIRE` checks (they
+  stay active if a build defines `NDEBUG`), `tests/gb_test_util.c` for bounded
+  headless programs, and this checklist. `cpu_harness` also records the
+  diagnostic initial registers.
+- [ ] **2. Data movement.** Boundary coverage for loads already implemented.
+- [ ] **3. Arithmetic and logic.** 8-bit and 16-bit ALU, DAA, and flag ops.
+- [ ] **4. Control flow and stack.** Jumps, calls, returns, push, and pop.
+- [ ] **5. CB prefix, CPU control, illegal opcodes, coverage report.**
+- [ ] **6. Independent ROMs and stage-2 exit notes.**

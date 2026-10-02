@@ -1,4 +1,4 @@
-#include <assert.h>
+#include "gb_check.h"
 #include <stdint.h>
 #include <string.h>
 #include "gb_cartridge.h"
@@ -14,13 +14,13 @@ int main(void) {
     }
     rom[0x14d] = checksum;
     GbCartridgeHeader info;
-    assert(gb_cartridge_parse_header(rom, sizeof rom, &info));
-    assert(strcmp(info.title, "POCKETGLASS") == 0);
-    assert(info.cartridge_type == 0);
-    assert(info.checksum_valid);
-    assert(!gb_cartridge_parse_header(rom, 0x14f, &info));
+    GB_REQUIRE(gb_cartridge_parse_header(rom, sizeof rom, &info));
+    GB_REQUIRE(strcmp(info.title, "POCKETGLASS") == 0);
+    GB_REQUIRE(info.cartridge_type == 0);
+    GB_REQUIRE(info.checksum_valid);
+    GB_REQUIRE(!gb_cartridge_parse_header(rom, 0x14f, &info));
     rom[0x134] ^= 1;
-    assert(gb_cartridge_parse_header(rom, sizeof rom, &info));
-    assert(!info.checksum_valid);
+    GB_REQUIRE(gb_cartridge_parse_header(rom, sizeof rom, &info));
+    GB_REQUIRE(!info.checksum_valid);
     return 0;
 }
