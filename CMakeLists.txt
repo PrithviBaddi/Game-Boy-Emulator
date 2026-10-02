@@ -6,7 +6,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_library(gbcore STATIC core/src/gb_bits.c core/src/gb_cartridge.c core/src/gb_memory.c core/src/gb_cpu.c)
+add_library(gbcore STATIC core/src/gb_bits.c core/src/gb_cartridge.c core/src/gb_memory.c core/src/gb_timer.c core/src/gb_cpu.c)
 target_include_directories(gbcore PUBLIC core/include)
 target_compile_options(gbcore PRIVATE -Wall -Wextra -Wpedantic)
 
@@ -69,6 +69,12 @@ target_link_libraries(cpu_coverage_tests PRIVATE gbcore)
 target_include_directories(cpu_coverage_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
 target_compile_options(cpu_coverage_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
 add_test(NAME cpu_coverage COMMAND cpu_coverage_tests)
+
+add_executable(timer_tests tests/test_timer.c tests/gb_test_util.c)
+target_link_libraries(timer_tests PRIVATE gbcore)
+target_include_directories(timer_tests PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+target_compile_options(timer_tests PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+add_test(NAME timer_divider COMMAND timer_tests)
 
 add_executable(cpu_demo examples/cpu_demo.c)
 target_link_libraries(cpu_demo PRIVATE gbcore)

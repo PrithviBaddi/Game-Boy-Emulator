@@ -1,6 +1,30 @@
 #include "gb_cpu.h"
 
 #include <string.h>
+#include "gb_timer.h"
+
+/* One machine cycle, then a bus transfer. Peeking with gb_memory_read does
+ * not call these, so a test or the desktop app can inspect memory without
+ * moving the divider. */
+static uint8_t mread(GbMemory *memory, unsigned *t_cycles, uint16_t address)
+{
+    gb_timer_advance(memory, 4);
+    *t_cycles += 4;
+    return gb_memory_read(memory, address);
+}
+
+static void mwrite(GbMemory *memory, unsigned *t_cycles, uint16_t address, uint8_t value)
+{
+    gb_timer_advance(memory, 4);
+    *t_cycles += 4;
+    gb_memory_write(memory, address, value);
+}
+
+static void midle(GbMemory *memory, unsigned *t_cycles)
+{
+    gb_timer_advance(memory, 4);
+    *t_cycles += 4;
+}
 
 enum
 {
@@ -216,19 +240,19 @@ static bool condition_met(const GbCpu *cpu, unsigned condition)
     }
 }
 
-static void push16(GbCpu *cpu, GbMemory *memory, uint16_t value)
+static void push16(GbCpu *cpu, GbMemory *memory, unsigned *t_cycles, uint16_t value)
 {
     cpu->sp = (uint16_t)(cpu->sp - 1);
-    gb_memory_write(memory, cpu->sp, (uint8_t)(value >> 8));
+    mwrite(memory, t_cycles, cpu->sp, (uint8_t)(value >> 8));
     cpu->sp = (uint16_t)(cpu->sp - 1);
-    gb_memory_write(memory, cpu->sp, (uint8_t)value);
+    mwrite(memory, t_cycles, cpu->sp, (uint8_t)value);
 }
 
-static uint16_t pop16(GbCpu *cpu, GbMemory *memory)
+static uint16_t pop16(GbCpu *cpu, GbMemory *memory, unsigned *t_cycles)
 {
-    uint8_t low = gb_memory_read(memory, cpu->sp);
+    uint8_t low = mread(memory, t_cycles, cpu->sp);
     cpu->sp = (uint16_t)(cpu->sp + 1);
-    uint8_t high = gb_memory_read(memory, cpu->sp);
+    uint8_t high = mread(memory, t_cycles, cpu->sp);
     cpu->sp = (uint16_t)(cpu->sp + 1);
     return (uint16_t)(low | ((uint16_t)high << 8));
 }
@@ -253,17 +277,18 @@ static void set_stack_pair(GbCpu *cpu, unsigned pair, uint16_t value)
 
 /* The HALT bug suppresses the PC increment of the opcode byte, so operand i
  * is read from opcode_pc + i rather than opcode_pc + i + 1. */
-static uint8_t operand8(const GbMemory *memory, uint16_t opcode_pc, bool opcode_repeat,
-                        unsigned index)
+static uint8_t operand8(GbMemory *memory, unsigned *t_cycles, uint16_t opcode_pc,
+                        bool opcode_repeat, unsigned index)
 {
     uint16_t address = (uint16_t)(opcode_pc + index + (opcode_repeat ? 0u : 1u));
-    return gb_memory_read(memory, address);
+    return mread(memory, t_cycles, address);
 }
 
-static uint16_t operand16(const GbMemory *memory, uint16_t opcode_pc, bool opcode_repeat)
+static uint16_t operand16(GbMemory *memory, unsigned *t_cycles, uint16_t opcode_pc,
+                          bool opcode_repeat)
 {
-    uint8_t low = operand8(memory, opcode_pc, opcode_repeat, 0);
-    uint8_t high = operand8(memory, opcode_pc, opcode_repeat, 1);
+    uint8_t low = operand8(memory, t_cycles, opcode_pc, opcode_repeat, 0);
+    uint8_t high = operand8(memory, t_cycles, opcode_pc, opcode_repeat, 1);
     return (uint16_t)(low | ((uint16_t)high << 8));
 }
 
@@ -287,19 +312,27 @@ static int pending_source(const GbMemory *memory)
 static void dispatch_interrupt(GbCpu *cpu, GbMemory *memory, int source, unsigned *cycles)
 {
     static const uint16_t vectors[] = {0x0040, 0x0048, 0x0050, 0x0058, 0x0060};
+    unsigned t_cycles = 0;
     cpu->ime = false;
     cpu->ei_delay = 0;
     cpu->halted = false;
+    /* Two acknowledge cycles, then the pushed PC, then the jump. 20 T-cycles. */
+    midle(memory, &t_cycles);
+    midle(memory, &t_cycles);
     uint8_t if_reg = gb_memory_read(memory, 0xff0f);
     gb_memory_write(memory, 0xff0f, (uint8_t)(if_reg & ~(1u << source)));
-    push16(cpu, memory, cpu->pc);
+    push16(cpu, memory, &t_cycles, cpu->pc);
+    midle(memory, &t_cycles);
     cpu->pc = vectors[source];
-    *cycles = 20;
+    *cycles = t_cycles;
 }
 
-static GbStepResult finish_step(GbCpu *cpu, unsigned *cycles, unsigned spent,
-                                bool enable_after, GbStepResult result)
+static GbStepResult finish_step(GbCpu *cpu, GbMemory *memory, unsigned *t_cycles,
+                                unsigned *cycles, unsigned spent, bool enable_after,
+                                GbStepResult result)
 {
+    if (spent > *t_cycles)
+        gb_timer_advance(memory, spent - *t_cycles);
     *cycles = spent;
     if (enable_after && cpu->ei_delay == 1 &&
         (result == GB_STEP_OK || result == GB_STEP_HALTED || result == GB_STEP_STOPPED))
@@ -410,6 +443,8 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         return GB_STEP_ILLEGAL;
     if (cpu->stopped)
     {
+        /* STOP freezes the divider. The returned 4 T-cycles are only the
+         * caller's view of a step that does not execute. */
         *cycles = 4;
         return GB_STEP_STOPPED;
     }
@@ -426,7 +461,10 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
             cpu->halted = false;
         else
         {
+            gb_timer_advance(memory, 4);
             *cycles = 4;
+            if (pending_source(memory) >= 0)
+                cpu->halted = false;
             return GB_STEP_HALTED;
         }
     }
@@ -442,16 +480,34 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         cpu->locked = true;
         return GB_STEP_ILLEGAL;
     }
+    /* The opcode fetch is the first machine cycle. The byte itself came from
+     * ROM or RAM, so doing the clock edge just after the read does not hide
+     * a divider increment from the instruction decoder. */
+    unsigned t_cycles = 0;
+    gb_timer_advance(memory, 4);
+    t_cycles = 4;
+    /* A reload that lands on this fetch sets IF during the cycle. The next
+     * instruction has not started its work yet, so the interrupt replaces it. */
+    if (cpu->ime)
+    {
+        int raised = pending_source(memory);
+        if (raised >= 0)
+        {
+            dispatch_interrupt(cpu, memory, raised, cycles);
+            *cycles += t_cycles;
+            return GB_STEP_OK;
+        }
+    }
     if ((opcode & 0xc7) == 0x06)
     {
         unsigned destination = (opcode >> 3) & 7u;
-        uint8_t value = operand8(memory, op_pc, opcode_repeat, 0);
+        uint8_t value = operand8(memory, &t_cycles, op_pc, opcode_repeat, 0);
 
         unsigned spent;
         if (destination == 6)
         {
             uint16_t hl = (uint16_t)(((uint16_t)cpu->h << 8) | cpu->l);
-            gb_memory_write(memory, hl, value);
+            mwrite(memory, &t_cycles, hl, value);
             spent = 12;
         }
         else
@@ -461,7 +517,7 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         }
 
         cpu->pc = end_pc(op_pc, opcode_repeat, 2);
-        return finish_step(cpu, cycles, spent, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, spent, enable_after, GB_STEP_OK);
     }
     if (opcode >= 0x40 && opcode <= 0x7f && opcode != 0x76)
     {
@@ -472,7 +528,7 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         uint8_t value;
         if (source == 6)
         {
-            value = gb_memory_read(memory, hl);
+            value = mread(memory, &t_cycles, hl);
         }
         else
         {
@@ -481,7 +537,7 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
 
         if (destination == 6)
         {
-            gb_memory_write(memory, hl, value);
+            mwrite(memory, &t_cycles, hl, value);
         }
         else
         {
@@ -489,23 +545,23 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         }
 
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, (source == 6 || destination == 6) ? 8 : 4, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, (source == 6 || destination == 6) ? 8 : 4, enable_after, GB_STEP_OK);
     }
     if (opcode >= 0x80 && opcode <= 0xbf)
     {
         unsigned source = opcode & 7u;
         uint16_t hl = (uint16_t)(((uint16_t)cpu->h << 8) | cpu->l);
         uint8_t value = source == 6
-                            ? gb_memory_read(memory, hl)
+                            ? mread(memory, &t_cycles, hl)
                             : *register_by_index(cpu, source);
         alu8(cpu, (opcode >> 3) & 7u, value);
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, source == 6 ? 8 : 4, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, source == 6 ? 8 : 4, enable_after, GB_STEP_OK);
     }
     if ((opcode & 0xcf) == 0x01)
     {
-        uint8_t low = operand8(memory, op_pc, opcode_repeat, 0);
-        uint8_t high = operand8(memory, op_pc, opcode_repeat, 1);
+        uint8_t low = operand8(memory, &t_cycles, op_pc, opcode_repeat, 0);
+        uint8_t high = operand8(memory, &t_cycles, op_pc, opcode_repeat, 1);
         uint16_t value = (uint16_t)(low | ((uint16_t)high << 8));
 
         switch ((opcode >> 4) & 3u)
@@ -528,7 +584,7 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         }
 
         cpu->pc = end_pc(op_pc, opcode_repeat, 3);
-        return finish_step(cpu, cycles, 12, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 12, enable_after, GB_STEP_OK);
     }
     if ((opcode & 0xc7) == 0x02)
     {
@@ -550,11 +606,11 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
 
         if (opcode & 0x08)
         {
-            cpu->a = gb_memory_read(memory, address);
+            cpu->a = mread(memory, &t_cycles, address);
         }
         else
         {
-            gb_memory_write(memory, address, cpu->a);
+            mwrite(memory, &t_cycles, address, cpu->a);
         }
 
         if (pair >= 2)
@@ -565,7 +621,7 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         }
 
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, 8, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 8, enable_after, GB_STEP_OK);
     }
 
     if ((opcode & 0xc7) == 0x04 || (opcode & 0xc7) == 0x05)
@@ -575,7 +631,7 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         uint16_t hl = (uint16_t)((cpu->h << 8) | cpu->l);
 
         uint8_t old_value = target == 6
-                                ? gb_memory_read(memory, hl)
+                                ? mread(memory, &t_cycles, hl)
                                 : *register_by_index(cpu, target);
         uint8_t result = (uint8_t)(old_value + (decrement ? -1 : 1));
 
@@ -595,12 +651,12 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         }
 
         if (target == 6)
-            gb_memory_write(memory, hl, result);
+            mwrite(memory, &t_cycles, hl, result);
         else
             *register_by_index(cpu, target) = result;
 
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, target == 6 ? 12 : 4, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, target == 6 ? 12 : 4, enable_after, GB_STEP_OK);
     }
 
     if ((opcode & 0xcf) == 0x03 || (opcode & 0xcf) == 0x0b)
@@ -610,7 +666,7 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         uint16_t value = (uint16_t)(pair_value(cpu, pair) + (decrement ? -1 : 1));
         set_pair(cpu, pair, value);
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, 8, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 8, enable_after, GB_STEP_OK);
     }
 
     if ((opcode & 0xcf) == 0x09)
@@ -628,20 +684,20 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         cpu->l = (uint8_t)result;
         cpu->f = flags;
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, 8, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 8, enable_after, GB_STEP_OK);
     }
 
     if ((opcode & 0xc7) == 0xc6)
     {
-        uint8_t value = operand8(memory, op_pc, opcode_repeat, 0);
+        uint8_t value = operand8(memory, &t_cycles, op_pc, opcode_repeat, 0);
         alu8(cpu, (opcode >> 3) & 7u, value);
         cpu->pc = end_pc(op_pc, opcode_repeat, 2);
-        return finish_step(cpu, cycles, 8, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 8, enable_after, GB_STEP_OK);
     }
 
     if ((opcode & 0xe7) == 0x20)
     {
-        int8_t offset = (int8_t)operand8(memory, op_pc, opcode_repeat, 0);
+        int8_t offset = (int8_t)operand8(memory, &t_cycles, op_pc, opcode_repeat, 0);
         unsigned spent;
         if (condition_met(cpu, (opcode >> 3) & 3u))
         {
@@ -653,7 +709,7 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
             cpu->pc = end_pc(op_pc, opcode_repeat, 2);
             spent = 8;
         }
-        return finish_step(cpu, cycles, spent, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, spent, enable_after, GB_STEP_OK);
     }
 
     if ((opcode & 0xe7) == 0xc0)
@@ -661,7 +717,8 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         unsigned spent;
         if (condition_met(cpu, (opcode >> 3) & 3u))
         {
-            cpu->pc = pop16(cpu, memory);
+            midle(memory, &t_cycles);
+            cpu->pc = pop16(cpu, memory, &t_cycles);
             spent = 20;
         }
         else
@@ -669,12 +726,12 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
             cpu->pc = end_pc(op_pc, opcode_repeat, 1);
             spent = 8;
         }
-        return finish_step(cpu, cycles, spent, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, spent, enable_after, GB_STEP_OK);
     }
 
     if ((opcode & 0xe7) == 0xc2)
     {
-        uint16_t target = operand16(memory, op_pc, opcode_repeat);
+        uint16_t target = operand16(memory, &t_cycles, op_pc, opcode_repeat);
         unsigned spent;
         if (condition_met(cpu, (opcode >> 3) & 3u))
         {
@@ -686,16 +743,17 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
             cpu->pc = end_pc(op_pc, opcode_repeat, 3);
             spent = 12;
         }
-        return finish_step(cpu, cycles, spent, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, spent, enable_after, GB_STEP_OK);
     }
 
     if ((opcode & 0xe7) == 0xc4)
     {
-        uint16_t target = operand16(memory, op_pc, opcode_repeat);
+        uint16_t target = operand16(memory, &t_cycles, op_pc, opcode_repeat);
         unsigned spent;
         if (condition_met(cpu, (opcode >> 3) & 3u))
         {
-            push16(cpu, memory, end_pc(op_pc, opcode_repeat, 3));
+            midle(memory, &t_cycles);
+            push16(cpu, memory, &t_cycles, end_pc(op_pc, opcode_repeat, 3));
             cpu->pc = target;
             spent = 24;
         }
@@ -704,7 +762,7 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
             cpu->pc = end_pc(op_pc, opcode_repeat, 3);
             spent = 12;
         }
-        return finish_step(cpu, cycles, spent, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, spent, enable_after, GB_STEP_OK);
     }
 
     if ((opcode & 0xcf) == 0xc1 || (opcode & 0xcf) == 0xc5)
@@ -713,37 +771,39 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         unsigned spent;
         if (opcode & 0x04)
         {
-            push16(cpu, memory, stack_pair(cpu, pair));
+            midle(memory, &t_cycles);
+            push16(cpu, memory, &t_cycles, stack_pair(cpu, pair));
             spent = 16;
         }
         else
         {
-            set_stack_pair(cpu, pair, pop16(cpu, memory));
+            set_stack_pair(cpu, pair, pop16(cpu, memory, &t_cycles));
             spent = 12;
         }
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, spent, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, spent, enable_after, GB_STEP_OK);
     }
 
     if ((opcode & 0xc7) == 0xc7)
     {
-        push16(cpu, memory, end_pc(op_pc, opcode_repeat, 1));
+        midle(memory, &t_cycles);
+        push16(cpu, memory, &t_cycles, end_pc(op_pc, opcode_repeat, 1));
         cpu->pc = (uint16_t)(opcode & 0x38);
-        return finish_step(cpu, cycles, 16, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 16, enable_after, GB_STEP_OK);
     }
 
     switch (opcode)
     {
     case 0x00: /* NOP: do nothing */
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, 4, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 4, enable_after, GB_STEP_OK);
     case 0x07: /* RLCA */
     case 0x17: /* RLA */
     {
         bool through = opcode == 0x17;
         cpu->a = rotate_left(cpu->a, through, (cpu->f & FLAG_C) != 0, &cpu->f);
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, 4, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 4, enable_after, GB_STEP_OK);
     }
     case 0x0f: /* RRCA */
     case 0x1f: /* RRA */
@@ -751,118 +811,126 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         bool through = opcode == 0x1f;
         cpu->a = rotate_right(cpu->a, through, (cpu->f & FLAG_C) != 0, &cpu->f);
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, 4, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 4, enable_after, GB_STEP_OK);
     }
     case 0x27: /* DAA */
         daa(cpu);
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, 4, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 4, enable_after, GB_STEP_OK);
     case 0x2f: /* CPL */
         cpu->a = (uint8_t)~cpu->a;
         cpu->f = (uint8_t)((cpu->f & (FLAG_Z | FLAG_C)) | FLAG_N | FLAG_H);
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, 4, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 4, enable_after, GB_STEP_OK);
     case 0x37: /* SCF */
         cpu->f = (uint8_t)((cpu->f & FLAG_Z) | FLAG_C);
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, 4, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 4, enable_after, GB_STEP_OK);
     case 0x3f: /* CCF */
         cpu->f = (uint8_t)((cpu->f & FLAG_Z) | ((cpu->f & FLAG_C) ? 0 : FLAG_C));
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, 4, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 4, enable_after, GB_STEP_OK);
     case 0xe0:
     case 0xf0:
     { /* LDH A,(a8) */
-        uint8_t offset = operand8(memory, op_pc, opcode_repeat, 0);
+        uint8_t offset = operand8(memory, &t_cycles, op_pc, opcode_repeat, 0);
         uint16_t address = (uint16_t)(0xff00 | offset);
         if (opcode == 0xe0)
-            gb_memory_write(memory, address, cpu->a);
+            mwrite(memory, &t_cycles, address, cpu->a);
         else
-            cpu->a = gb_memory_read(memory, address);
+            cpu->a = mread(memory, &t_cycles, address);
         cpu->pc = end_pc(op_pc, opcode_repeat, 2);
-        return finish_step(cpu, cycles, 12, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 12, enable_after, GB_STEP_OK);
     }
     case 0xe2: /* LD (C),A */
     case 0xf2:
     { /* LD A,(C) */
         uint16_t address = (uint16_t)(0xff00 | cpu->c);
         if (opcode == 0xe2)
-            gb_memory_write(memory, address, cpu->a);
+            mwrite(memory, &t_cycles, address, cpu->a);
         else
-            cpu->a = gb_memory_read(memory, address);
+            cpu->a = mread(memory, &t_cycles, address);
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, 8, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 8, enable_after, GB_STEP_OK);
     }
     case 0xf9: /* LD SP,HL */
         cpu->sp = (uint16_t)((cpu->h << 8) | cpu->l);
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, 8, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 8, enable_after, GB_STEP_OK);
 
     case 0xfa:
     { /* LD A,(a16): read A from a 16-bit address */
-        uint8_t low = operand8(memory, op_pc, opcode_repeat, 0);
-        uint8_t high = operand8(memory, op_pc, opcode_repeat, 1);
+        uint8_t low = operand8(memory, &t_cycles, op_pc, opcode_repeat, 0);
+        uint8_t high = operand8(memory, &t_cycles, op_pc, opcode_repeat, 1);
         uint16_t address = (uint16_t)(low | ((uint16_t)high << 8));
-        cpu->a = gb_memory_read(memory, address);
+        cpu->a = mread(memory, &t_cycles, address);
         cpu->pc = end_pc(op_pc, opcode_repeat, 3);
-        return finish_step(cpu, cycles, 16, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 16, enable_after, GB_STEP_OK);
     }
     case 0x08:
     { /* LD (a16),SP: store SP low byte, then high byte */
-        uint8_t low = operand8(memory, op_pc, opcode_repeat, 0);
-        uint8_t high = operand8(memory, op_pc, opcode_repeat, 1);
+        uint8_t low = operand8(memory, &t_cycles, op_pc, opcode_repeat, 0);
+        uint8_t high = operand8(memory, &t_cycles, op_pc, opcode_repeat, 1);
         uint16_t address = (uint16_t)(low | ((uint16_t)high << 8));
-        gb_memory_write(memory, address, (uint8_t)cpu->sp);
-        gb_memory_write(memory, (uint16_t)(address + 1), (uint8_t)(cpu->sp >> 8));
+        mwrite(memory, &t_cycles, address, (uint8_t)cpu->sp);
+        mwrite(memory, &t_cycles, (uint16_t)(address + 1), (uint8_t)(cpu->sp >> 8));
         cpu->pc = end_pc(op_pc, opcode_repeat, 3);
-        return finish_step(cpu, cycles, 20, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 20, enable_after, GB_STEP_OK);
     }
 
     case 0xea:
     { /* LD (a16),A: write A to the next 16-bit address */
-        uint8_t low = operand8(memory, op_pc, opcode_repeat, 0);
-        uint8_t high = operand8(memory, op_pc, opcode_repeat, 1);
+        uint8_t low = operand8(memory, &t_cycles, op_pc, opcode_repeat, 0);
+        uint8_t high = operand8(memory, &t_cycles, op_pc, opcode_repeat, 1);
         uint16_t address = (uint16_t)(low | ((uint16_t)high << 8));
-        gb_memory_write(memory, address, cpu->a);
+        mwrite(memory, &t_cycles, address, cpu->a);
         cpu->pc = end_pc(op_pc, opcode_repeat, 3);
-        return finish_step(cpu, cycles, 16, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 16, enable_after, GB_STEP_OK);
     }
     case 0xe8: /* ADD SP,e8 */
     case 0xf8: /* LD HL,SP+e8 */
     {
-        int8_t offset = (int8_t)operand8(memory, op_pc, opcode_repeat, 0);
+        int8_t offset = (int8_t)operand8(memory, &t_cycles, op_pc, opcode_repeat, 0);
         add_sp_signed(cpu, offset, opcode == 0xe8);
         cpu->pc = end_pc(op_pc, opcode_repeat, 2);
-        return finish_step(cpu, cycles, opcode == 0xe8 ? 16 : 12, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, opcode == 0xe8 ? 16 : 12, enable_after, GB_STEP_OK);
     }
     case 0x18:
     { /* JR e8: jump relative to the next instruction */
-        int8_t offset = (int8_t)operand8(memory, op_pc, opcode_repeat, 0);
+        int8_t offset = (int8_t)operand8(memory, &t_cycles, op_pc, opcode_repeat, 0);
         cpu->pc = (uint16_t)(end_pc(op_pc, opcode_repeat, 2) + offset);
-        return finish_step(cpu, cycles, 12, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 12, enable_after, GB_STEP_OK);
     }
     case 0xc3: /* JP a16 */
-        cpu->pc = operand16(memory, op_pc, opcode_repeat);
-        return finish_step(cpu, cycles, 16, enable_after, GB_STEP_OK);
+        cpu->pc = operand16(memory, &t_cycles, op_pc, opcode_repeat);
+        return finish_step(cpu, memory, &t_cycles, cycles, 16, enable_after, GB_STEP_OK);
     case 0xc9: /* RET */
-        cpu->pc = pop16(cpu, memory);
-        return finish_step(cpu, cycles, 16, enable_after, GB_STEP_OK);
-    case 0xcd: /* CALL a16 */
-        push16(cpu, memory, end_pc(op_pc, opcode_repeat, 3));
-        cpu->pc = operand16(memory, op_pc, opcode_repeat);
-        return finish_step(cpu, cycles, 24, enable_after, GB_STEP_OK);
+        cpu->pc = pop16(cpu, memory, &t_cycles);
+        return finish_step(cpu, memory, &t_cycles, cycles, 16, enable_after, GB_STEP_OK);
+    case 0xcd: /* CALL a16: read the target, wait one cycle, then push PC */
+    {
+        uint16_t target = operand16(memory, &t_cycles, op_pc, opcode_repeat);
+        midle(memory, &t_cycles);
+        push16(cpu, memory, &t_cycles, end_pc(op_pc, opcode_repeat, 3));
+        cpu->pc = target;
+        return finish_step(cpu, memory, &t_cycles, cycles, 24, enable_after, GB_STEP_OK);
+    }
     case 0xd9: /* RETI */
-        cpu->pc = pop16(cpu, memory);
+        cpu->pc = pop16(cpu, memory, &t_cycles);
         cpu->ime = true;
-        return finish_step(cpu, cycles, 16, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 16, enable_after, GB_STEP_OK);
     case 0xe9: /* JP HL */
         cpu->pc = pair_value(cpu, 2);
-        return finish_step(cpu, cycles, 4, enable_after, GB_STEP_OK);
-    case 0x10: /* STOP: the following byte is part of the instruction */
-        (void)operand8(memory, op_pc, opcode_repeat, 0);
+        return finish_step(cpu, memory, &t_cycles, cycles, 4, enable_after, GB_STEP_OK);
+    case 0x10: /* STOP: the following byte is skipped, and the divider resets */
+    {
+        uint16_t skipped = (uint16_t)(op_pc + (opcode_repeat ? 0u : 1u));
+        (void)gb_memory_read(memory, skipped);
+        gb_memory_write(memory, 0xff04, 0);
         cpu->pc = end_pc(op_pc, opcode_repeat, 2);
         cpu->stopped = true;
-        return finish_step(cpu, cycles, 4, enable_after, GB_STEP_STOPPED);
+        return finish_step(cpu, memory, &t_cycles, cycles, 4, enable_after, GB_STEP_STOPPED);
+    }
     case 0x76: /* HALT */
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
         /* The DMG HALT bug: a pending interrupt with IME off skips the halt
@@ -870,17 +938,17 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         if (!cpu->ime && pending_source(memory) >= 0)
         {
             cpu->halt_bug = true;
-            return finish_step(cpu, cycles, 4, enable_after, GB_STEP_OK);
+            return finish_step(cpu, memory, &t_cycles, cycles, 4, enable_after, GB_STEP_OK);
         }
         cpu->halted = true;
-        return finish_step(cpu, cycles, 4, enable_after, GB_STEP_HALTED);
+        return finish_step(cpu, memory, &t_cycles, cycles, 4, enable_after, GB_STEP_HALTED);
     case 0xcb:
     {
-        uint8_t cb = operand8(memory, op_pc, opcode_repeat, 0);
+        uint8_t cb = operand8(memory, &t_cycles, op_pc, opcode_repeat, 0);
         unsigned reg = cb & 7u;
         unsigned group = cb >> 6;
         uint16_t hl = pair_value(cpu, 2);
-        uint8_t value = reg == 6 ? gb_memory_read(memory, hl)
+        uint8_t value = reg == 6 ? mread(memory, &t_cycles, hl)
                                  : *register_by_index(cpu, reg);
         unsigned spent = reg == 6 ? 16u : 8u;
         if (group == 1)
@@ -904,23 +972,23 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
                                    : (uint8_t)(value | mask);
             }
             if (reg == 6)
-                gb_memory_write(memory, hl, value);
+                mwrite(memory, &t_cycles, hl, value);
             else
                 *register_by_index(cpu, reg) = value;
         }
         cpu->pc = end_pc(op_pc, opcode_repeat, 2);
-        return finish_step(cpu, cycles, spent, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, spent, enable_after, GB_STEP_OK);
     }
     case 0xf3: /* DI */
         cpu->ime = false;
         cpu->ei_delay = 0;
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, 4, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 4, enable_after, GB_STEP_OK);
     case 0xfb: /* EI: IME becomes visible after the following instruction */
         if (!cpu->ime)
             cpu->ei_delay = 1;
         cpu->pc = end_pc(op_pc, opcode_repeat, 1);
-        return finish_step(cpu, cycles, 4, enable_after, GB_STEP_OK);
+        return finish_step(cpu, memory, &t_cycles, cycles, 4, enable_after, GB_STEP_OK);
     default:
         return GB_STEP_UNSUPPORTED;
     }
