@@ -9,7 +9,8 @@ Try it: `./pocketglass catch.gb` from the [macOS arm64 package](#build).
 </p>
 
 <p align="center">
-  <img src="docs/images/catch.png" alt="One frame of Catch: the player at the bottom and the block falling on the left" width="240" />
+  <img width="592" height="572" alt="Screenshot 2026-10-02 at 9 53 43 AM" src="https://github.com/user-attachments/assets/155cb76c-6e33-4a23-9324-96457aebd02d" />
+
 </p>
 
 The GIF and the still are the emulator's framebuffer for one run of Catch, scaled 3× with the same green palette as the window. The GIF holds the title, then plays consecutive frames at 25 fps (the Game Boy refreshes at about 60) so the fall stays readable. In that run the player steps right while a block falls on the left, steps back, and catches the coin.
