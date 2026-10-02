@@ -119,6 +119,35 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         *cycles = source == 6 ? 8 : 4;
         return GB_STEP_OK;
     }
+    if ((opcode & 0xcf) == 0x01)
+    {
+        uint8_t low = gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
+        uint8_t high = gb_memory_read(memory, (uint16_t)(cpu->pc + 2));
+        uint16_t value = (uint16_t)(low | ((uint16_t)high << 8));
+
+        switch ((opcode >> 4) & 3u)
+        {
+        case 0:
+            cpu->b = high;
+            cpu->c = low;
+            break; /* BC */
+        case 1:
+            cpu->d = high;
+            cpu->e = low;
+            break; /* DE */
+        case 2:
+            cpu->h = high;
+            cpu->l = low;
+            break; /* HL */
+        case 3:
+            cpu->sp = value;
+            break; /* SP */
+        }
+
+        cpu->pc += 3;
+        *cycles = 12;
+        return GB_STEP_OK;
+    }
     switch (opcode)
     {
     case 0x00: /* NOP: do nothing */

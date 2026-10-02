@@ -212,5 +212,39 @@ int main(void)
         assert(cycles == (destination == 6 ? 12u : 8u));
     }
 
+    /* LD BC/DE/HL/SP,0xC123 */
+    for (unsigned pair = 0; pair < 4; ++pair)
+    {
+        rom[0x100] = (uint8_t)(0x01 | (pair << 4));
+        rom[0x101] = 0x23; /* low byte */
+        rom[0x102] = 0xc1; /* high byte */
+
+        gb_cpu_init(&cpu);
+        cpu.f = 0x10;
+        assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+
+        uint16_t actual = 0;
+        switch (pair)
+        {
+        case 0:
+            actual = (uint16_t)((cpu.b << 8) | cpu.c);
+            break;
+        case 1:
+            actual = (uint16_t)((cpu.d << 8) | cpu.e);
+            break;
+        case 2:
+            actual = (uint16_t)((cpu.h << 8) | cpu.l);
+            break;
+        case 3:
+            actual = cpu.sp;
+            break;
+        }
+
+        assert(actual == 0xc123);
+        assert(cpu.pc == 0x103);
+        assert(cpu.f == 0x10);
+        assert(cycles == 12);
+    }
+
     return 0;
 }
