@@ -86,3 +86,7 @@ Every other base opcode, including the 11 illegal opcodes, returned
   UndefinedBehaviorSanitizer builds of the unit tests and `cpu_demo` passed.
   AddressSanitizer's runtime aborts during its own startup on this AppleClang
   and macOS combination, before the test body runs.
+
+Stage 3 took the timer handoff. `DIV`/`TIMA`/`TMA`/`TAC` and the timer
+interrupt are in `docs/TIMER.md`. Joypad release of `STOP`, the PPU, and MBC
+are still later stages.

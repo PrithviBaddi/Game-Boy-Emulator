@@ -14,11 +14,14 @@
 - Stage 2 CPU is implemented. `ctest` has 11 passing targets, including
   opcode coverage of 245 legal base opcodes, 11 illegal opcodes, and 256 CB
   opcodes. `cpu_demo` still ends at `RAM[0xC000] = 69` and 48 T-cycles.
-- Blargg individual cpu_instrs: 10 Passed, `02-interrupts` reports
-  `Timer doesn't work`. Mooneye `daa`, `ei_sequence`, `ei_timing`,
-  `rapid_di_ei`, `if_ie_registers`, and `boot_regs-dmgABC` passed. Timer and
-  instruction-timing ROMs are recorded in the README and are not faked.
-- Next is stage 3: the timer and the rest of the interrupt sources, then the
-  PPU. `gb_cpu_request_interrupt` is the CPU-side hook those devices should
-  call. `STOP` stays stopped until a later joypad stage clears `stopped`.
+- Stage 3 timer is implemented. `ctest` has 12 passing targets. `cpu_demo`
+  still ends at `RAM[0xC000] = 69` and 48 T-cycles. The divider and TIMA
+  advance on machine cycles inside `gb_cpu_step`. Overflow requests interrupt
+  `0x50` through `gb_cpu_request_interrupt`.
+- Blargg individual cpu_instrs: 11 Passed, including `02-interrupts`.
+  Mooneye `div_timing`, `pop_timing`, and the 13 acceptance timer ROMs passed.
+  `halt_ime0_ei` and `call_timing` still hit the runner's cycle limit because
+  they wait on `LY` and OAM DMA, which are stage 4.
+- Next is the PPU. `STOP` stays stopped until a later joypad stage clears
+  `stopped`. Joypad, serial, and the APU are not modeled.
 - No claim that a commercial game or the full picture hardware runs.

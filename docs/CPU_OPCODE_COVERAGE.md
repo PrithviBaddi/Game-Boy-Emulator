@@ -17,4 +17,5 @@ written yet. After this stage the coverage test fails if any legal opcode
 still returns it.
 
 Cycles from `gb_cpu_step` are T-cycles. `(HL)` CB shifts, rotates, RES, and
-SET take 16. `BIT b,(HL)` takes 12. Register CB operations take 8.
+SET take 16. `BIT b,(HL)` takes 12. Register CB operations take 8. The divider
+uses those same T-cycle counts; see `docs/TIMER.md`.

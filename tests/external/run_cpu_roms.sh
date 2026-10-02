@@ -35,7 +35,8 @@ for rom in "$roms"/mooneye/acceptance/instr/*.gb \
            "$roms"/mooneye/acceptance/div_timing.gb \
            "$roms"/mooneye/acceptance/pop_timing.gb \
            "$roms"/mooneye/acceptance/halt_ime0_ei.gb \
-           "$roms"/mooneye/acceptance/call_timing.gb; do
+           "$roms"/mooneye/acceptance/call_timing.gb \
+           "$roms"/mooneye/acceptance/timer/*.gb; do
     if [ -f "$rom" ]; then
         if ! "$runner" --mooneye "$rom"; then
             fail=$((fail + 1))

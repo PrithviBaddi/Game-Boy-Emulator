@@ -10,10 +10,11 @@ Milestone 0 is complete on an Apple M2 Mac. Milestone 1 reads a cartridge
 header and maps a 32 KiB ROM-only cartridge into a Game Boy memory bus.
 Stage 2 of the CPU is complete: every documented legal SM83 opcode, including
 the CB prefix, has an implementation, and the 11 illegal opcodes lock the CPU
-instead of running as `NOP`. The desktop window still does not play a game.
-Timers, the picture processor, audio, and cartridge banking are later stages.
-`tinydbg` is
-an unrelated, abandoned debugger experiment and is not a dependency.
+instead of running as `NOP`. Stage 3 adds the DMG divider and programmable
+timer. A timer overflow can request interrupt `0x50`. The desktop window still
+does not play a game. The picture processor, audio, and cartridge banking are
+later stages. `tinydbg` is an unrelated, abandoned debugger experiment and
+is not a dependency.
 
 ## Build and run
 
@@ -56,9 +57,11 @@ The test changes one title byte and confirms that the checksum becomes invalid.
 The CPU will ask the bus for a byte at an address. For instance, address
 `0x0100` comes from the cartridge, while `0xC123` is working RAM. Writes to
 the ROM are ignored. Addresses `0xE000` through `0xFDFF` mirror part of RAM.
-`gb_memory.c` is the single routing point for these accesses. The I/O region
-currently stores plain bytes; later hardware components will give those
-registers their real behavior. Only 32 KiB ROM-only cartridges are mapped now.
+`gb_memory.c` is the single routing point for these accesses. `DIV`, `TIMA`,
+`TMA`, and `TAC` (`FF04`–`FF07`) are the timer in `gb_timer.c`. The other I/O
+ports still store plain bytes. Only 32 KiB ROM-only cartridges are mapped now.
+The clock contract is in `docs/TIMER.md`: `gb_cpu_step` still reports
+T-cycles, and the timer advances one machine cycle (4 T-cycles) at a time.
 
 ## First CPU experiment
 
@@ -99,15 +102,20 @@ tests/external/run_cpu_roms.sh
 Blargg's individual `cpu_instrs` ROMs come from the retrio mirror at commit
 `c240dd7` (Shay Green's test ROMs; `cpu_instrs/readme.txt` has no separate
 SPDX license, so the binaries are not committed). Mooneye's published build
-`mts-20260714-0944-31510e1` is MIT licensed. On the current core, 10 of the 11
-individual Blargg ROMs print `Passed`. `02-interrupts` stops with
-`Timer doesn't work`. Mooneye `instr/daa`, `ei_sequence`, `ei_timing`,
-`rapid_di_ei`, `if_ie_registers`, and `boot_regs-dmgABC` report the pass
-signature. `div_timing` and `pop_timing` report the failure signature.
-`halt_ime0_ei` and `call_timing` reach the cycle limit without a signature.
-Those depend on the timer, the picture hardware, or interrupt timing finer
-than one instruction. The combined 64 KiB `cpu_instrs.gb` is not run: the
-memory bus maps 32 KiB only.
+`mts-20260714-0944-31510e1` is MIT licensed. All 11 individual Blargg ROMs
+print `Passed`, including `02-interrupts`. Mooneye `instr/daa`,
+`ei_sequence`, `ei_timing`, `rapid_di_ei`, `if_ie_registers`,
+`boot_regs-dmgABC`, `div_timing`, and `pop_timing` report the pass signature.
+The timer acceptance ROMs do too: `div_write`, `rapid_toggle`, `tim00`,
+`tim00_div_trigger`, `tim01`, `tim01_div_trigger`, `tim10`,
+`tim10_div_trigger`, `tim11`, `tim11_div_trigger`, `tima_reload`,
+`tima_write_reloading`, and `tma_write_reloading`.
+
+`halt_ime0_ei` reaches the cycle limit with no signature. It waits until
+`LY` is `0` and then for a VBlank interrupt. There is no picture processor,
+so that wait does not end. `call_timing` also reaches the cycle limit. It
+waits for VBlank and runs an OAM DMA transfer; both are stage 4. The combined
+64 KiB `cpu_instrs.gb` is not run: the memory bus maps 32 KiB only.
 
 ## First C lesson
 
