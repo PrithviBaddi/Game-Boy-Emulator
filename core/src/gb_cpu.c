@@ -87,6 +87,13 @@ GbStepResult gb_cpu_step(GbCpu *cpu, GbMemory *memory, unsigned *cycles)
         *cycles = 4;
         return GB_STEP_OK;
     }
+    case 0x18:
+    { /* JR e8: jump relative to the next instruction */
+        int8_t offset = (int8_t)gb_memory_read(memory, (uint16_t)(cpu->pc + 1));
+        cpu->pc = (uint16_t)(cpu->pc + 2 + offset);
+        *cycles = 12;
+        return GB_STEP_OK;
+    }
     case 0x76: /* HALT: wait until future interrupt handling wakes CPU */
         cpu->pc += 1;
         cpu->halted = true;

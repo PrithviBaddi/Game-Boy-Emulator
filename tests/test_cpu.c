@@ -67,5 +67,24 @@ int main(void)
     assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
     assert(cpu.a == 0);
     assert(cpu.f == 0xa0);
+    /* JR +2: start at 0x0100, skip the two-byte instruction,
+   then move two bytes forward to 0x0104. */
+    rom[0x100] = 0x18;
+    rom[0x101] = 0x02;
+    gb_cpu_init(&cpu);
+    cpu.f = 0x10;
+    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    assert(cpu.pc == 0x104);
+    assert(cycles == 12);
+    assert(cpu.f == 0x10); /* JR does not change flags */
+
+    /* JR -4: start at 0x0104 and land at 0x0102. */
+    rom[0x104] = 0x18;
+    rom[0x105] = 0xfc; /* 0xfc represents -4 as a signed byte */
+    gb_cpu_init(&cpu);
+    cpu.pc = 0x104;
+    assert(gb_cpu_step(&cpu, &memory, &cycles) == GB_STEP_OK);
+    assert(cpu.pc == 0x102);
+    assert(cycles == 12);
     return 0;
 }
